@@ -30,25 +30,25 @@
 
 ## Query
 
-- `pad search <term>` - full-text search across objects
-- `pad show <hash>` - display object by hash prefix
-- `pad edges <hash>` - show what an object links to/from
-- `pad history` - timeline view of events
-- `pad sources` - list all sources that have contributed
+- `pad --search <term>` - full-text search across objects
+- `pad --show <hash>` - display object by hash prefix
+- `pad --edges <hash>` - show what an object links to/from
+- `pad --history` - timeline view of events
+- `pad --sources` - list all sources that have contributed
 
 ## Annotations
 
-- `pad tag <hash> <tag>` - add annotation to object
-- `pad untag <hash> <tag>` - remove annotation
-- `pad tagged <tag>` - list objects with tag
+- `pad --tag <hash> <tag>` - add annotation to object
+- `pad --untag <hash> <tag>` - remove annotation
+- `pad --tagged <tag>` - list objects with tag
 
 ## Maintenance
 
 - Garbage collection for orphaned cold objects
 - Compression for cold objects (zstd)
 - Size budget enforcement (prune oldest cold objects when over limit)
-- `pad stats` - db size, object count, coldness distribution
-- `pad vacuum` - run maintenance tasks
+- `pad --stats` - db size, object count, coldness distribution
+- `pad --vacuum` - run maintenance tasks
 
 ## Sketching
 
@@ -58,10 +58,10 @@
 
 ## Shell Integration
 
-- `pad exec <cmd>` - alias for command wrapping
+- `pad <cmd>` - wrap any command, capture output, log as event
 - zsh/bash preexec hook to auto-capture commands
 - Fish shell integration
-- `pad recall <pattern>` - find past command outputs
+- `pad --recall <pattern>` - find past command outputs
 
 ## Edges
 
