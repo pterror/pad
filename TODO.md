@@ -28,9 +28,55 @@
 
 - `pad --web` - local web UI for browsing/notes
 
+## Query
+
+- `pad search <term>` - full-text search across objects
+- `pad show <hash>` - display object by hash prefix
+- `pad edges <hash>` - show what an object links to/from
+- `pad history` - timeline view of events
+- `pad sources` - list all sources that have contributed
+
+## Annotations
+
+- `pad tag <hash> <tag>` - add annotation to object
+- `pad untag <hash> <tag>` - remove annotation
+- `pad tagged <tag>` - list objects with tag
+
+## Maintenance
+
+- Garbage collection for orphaned cold objects
+- Compression for cold objects (zstd)
+- Size budget enforcement (prune oldest cold objects when over limit)
+- `pad stats` - db size, object count, coldness distribution
+- `pad vacuum` - run maintenance tasks
+
+## Sketching
+
+- Detect shape: list, log, prose, code, structured
+- Generate sketches on ingest (first N lines, summary)
+- Store sketch as linked object with edge type `sketch_of`
+
+## Shell Integration
+
+- `pad exec <cmd>` - alias for command wrapping
+- zsh/bash preexec hook to auto-capture commands
+- Fish shell integration
+- `pad recall <pattern>` - find past command outputs
+
+## Edges
+
+- `supersedes` - object replaces another
+- `derived_from` - object was generated from another
+- `references` - object mentions another
+- `reply_to` - conversational threading
+
 ## Extensions
 
 - clipboard
 - browser
 - git
 - shell history
+- email (mbox, notmuch)
+- rss/atom feeds
+- file watcher (inotify)
+- screenshots (ocr → text object)
