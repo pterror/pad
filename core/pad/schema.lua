@@ -29,7 +29,9 @@ mod.init_sql = [[
     sketch TEXT,                      -- always present: summary/preview
     payload TEXT,                     -- full content (only if tier='full')
     size INTEGER,                     -- original size in bytes
-    coldness REAL DEFAULT 0,          -- decay weight for retrieval ranking
+    coldness REAL DEFAULT 0,          -- decay weight for retrieval ranking (0=hot, 1=cold)
+    last_accessed_at INTEGER,         -- when object was last retrieved
+    access_count INTEGER DEFAULT 0,   -- how many times accessed
     created_at INTEGER NOT NULL,
     FOREIGN KEY (event_id) REFERENCES events(id)
   );
@@ -69,6 +71,7 @@ mod.init_sql = [[
   CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
   CREATE INDEX IF NOT EXISTS idx_annotations_object ON annotations(object_id);
   CREATE INDEX IF NOT EXISTS idx_annotations_key ON annotations(key);
+  CREATE INDEX IF NOT EXISTS idx_objects_coldness ON objects(coldness);
 ]]
 
 return mod

@@ -27,13 +27,16 @@ local function main(args)
       io.stderr:write("usage: pad query \"...\"\n")
       os.exit(1)
     end
-    -- simple: just search sketches for now
+    -- search sketches, ordered by effective coldness (warmer first)
+    local now = os.time()
     local results = pad.query([[
       SELECT id, shape, sketch FROM objects
       WHERE sketch LIKE ?
-      ORDER BY created_at DESC
+      ORDER BY
+        coldness + ((? - COALESCE(last_accessed_at, created_at)) / 86400.0 * 0.001) ASC,
+        created_at DESC
       LIMIT 20;
-    ]], "%" .. query .. "%")
+    ]], "%" .. query .. "%", now)
     for id, shape, sketch in results do
       print(string.format("[%d] (%s) %s", id, shape, sketch:sub(1, 80)))
     end

@@ -13,6 +13,7 @@ local sqlite = require("dep.sqlite")
 local json = require("dep.lunajson")
 local schema = require("pad.schema")
 local get_cwd = require("dep.get_cwd").get_cwd
+local xxhash = require("dep.xxhash")
 
 local mod = {}
 
@@ -46,14 +47,9 @@ mod.db = db
 db:execute(schema.init_sql)
 
 --[[@param data string]]
---[[@return string hash]]
+--[[@return string hash 16 hex chars]]
 local function hash_content(data)
-  -- simple djb2 hash for now, upgrade to sha256 later
-  local h = 5381
-  for i = 1, #data do
-    h = ((h * 33) + data:byte(i)) % 0xFFFFFFFF
-  end
-  return string.format("%08x", h)
+  return xxhash.hash(data)
 end
 
 --[[@param content string]]
@@ -160,7 +156,14 @@ function mod.ingest(content, opts)
   local existing = db:query("SELECT id FROM objects WHERE hash = ?;", content_hash)
   local existing_id = existing()
   if existing_id then
-    -- already exists, just return existing
+    -- content seen again - warm it up (reduce coldness)
+    db:execute([[
+      UPDATE objects SET
+        last_accessed_at = ?,
+        access_count = access_count + 1,
+        coldness = MAX(0, coldness - 0.05)
+      WHERE id = ?;
+    ]], os.time(), existing_id)
     return existing_id, content_hash
   end
 
@@ -240,6 +243,46 @@ function mod.annotate(opts)
     INSERT INTO annotations (event_id, object_id, key, value, created_at)
     VALUES (?, ?, ?, ?, ?);
   ]], opts.event_id, opts.object_id, opts.key, opts.value, os.time())
+end
+
+--[[
+Retrieve an object by id, warming it in the process
+
+@param id integer
+@return table|nil object
+]]
+function mod.get_object(id)
+  local now = os.time()
+
+  -- warm on access
+  db:execute([[
+    UPDATE objects SET
+      last_accessed_at = ?,
+      access_count = access_count + 1,
+      coldness = MAX(0, coldness - 0.1)
+    WHERE id = ?;
+  ]], now, id)
+
+  -- fetch and return
+  local iter = db:query([[
+    SELECT id, hash, tier, shape, sketch, payload, size, coldness, created_at
+    FROM objects WHERE id = ?;
+  ]], id)
+
+  local obj_id, hash, tier, shape, sketch, payload, size, coldness, created_at = iter()
+  if not obj_id then return nil end
+
+  return {
+    id = obj_id,
+    hash = hash,
+    tier = tier,
+    shape = shape,
+    sketch = sketch,
+    payload = payload,
+    size = size,
+    coldness = coldness,
+    created_at = created_at,
+  }
 end
 
 --[[
