@@ -2,27 +2,27 @@
 
 ## Core
 
-- **Dedup provenance gap** - when duplicate content arrives, we warm the object but don't record the new source event. The provenance of repeated captures is lost.
+- ~~**Dedup provenance gap**~~ - DONE. Duplicate ingest now records a new event with `dedup_object_id` annotation.
 
-- **Batch coldness recalculation** - `recalculate_coldness()` function designed but not implemented. Would allow periodic maintenance to update all coldness values.
+- ~~**Batch coldness recalculation**~~ - DONE. `pad --vacuum` runs age-based cooling (0.01/day).
 
 ## Tests
 
-- **Integration tests** - current tests only check hash and schema. Need tests that actually use sqlite (ingest, dedup, coldness warming, queries).
+- ~~**Integration tests**~~ - DONE. 33 tests: hash, schema, validators, integration (ingest, dedup, warmth, linking, annotations, shape detection, provenance).
 
 ## Runtime Modes
 
-- **Interactive (TTY)** - REPL + daemon
-- **No TTY, no stdin** - daemon only
-- **Piped stdin** - ingest and exit (current behavior)
+- **Interactive (TTY)** - REPL + daemon (stub exists)
+- **No TTY, no stdin** - daemon only (stub exists)
+- ~~**Piped stdin**~~ - DONE. `echo "hello" | pad`
 
 ## CLI
 
-- `pad ls -la` - wrap shell commands, log as events with `source = "command"`
-- `pad --recent` - show recent captures
+- ~~`pad ls -la`~~ - DONE. Shell wrapper with `source = "command"`
+- ~~`pad --recent`~~ - DONE
 - `pad --urgent` - time-aware priority (calendar integration)
-- `pad --orphans` - show unlinked objects
-- `pad --note` - note taking mode
+- ~~`pad --orphans`~~ - DONE
+- ~~`pad --note`~~ - DONE. `pad --note "text"` or `pad --note` for stdin
 
 ## Web
 
@@ -30,38 +30,38 @@
 
 ## Query
 
-- `pad --search <term>` - full-text search across objects
-- `pad --show <hash>` - display object by hash prefix
-- `pad --edges <hash>` - show what an object links to/from
-- `pad --history` - timeline view of events
-- `pad --sources` - list all sources that have contributed
+- ~~`pad --search <term>`~~ - DONE
+- ~~`pad --show <id|hash>`~~ - DONE. Supports id or hash prefix
+- `pad --edges <id|hash>` - show what an object links to/from (edges shown in --show)
+- ~~`pad --history`~~ - DONE. Event timeline with object counts
+- ~~`pad --sources`~~ - DONE. Source breakdown with event counts
 
 ## Annotations
 
-- `pad --tag <hash> <tag>` - add annotation to object
-- `pad --untag <hash> <tag>` - remove annotation
-- `pad --tagged <tag>` - list objects with tag
+- ~~`pad --tag <id>:<tag>`~~ - DONE
+- ~~`pad --untag <id>:<tag>`~~ - DONE
+- ~~`pad --tagged <tag>`~~ - DONE
 
 ## Maintenance
 
 - Garbage collection for orphaned cold objects
 - Compression for cold objects (zstd)
 - Size budget enforcement (prune oldest cold objects when over limit)
-- `pad --stats` - db size, object count, coldness distribution
-- `pad --vacuum` - run maintenance tasks
+- ~~`pad --stats`~~ - DONE
+- ~~`pad --vacuum`~~ - DONE. Runs coldness recalculation
 
 ## Sketching
 
-- Detect shape: list, log, prose, code, structured
-- Generate sketches on ingest (first N lines, summary)
+- Detect shape: list, log, prose, code, structured (basic shapes done)
+- Generate sketches on ingest (first N lines, summary) - DONE
 - Store sketch as linked object with edge type `sketch_of`
 
 ## Shell Integration
 
-- `pad <cmd>` - wrap any command, capture output, log as event
-- zsh/bash preexec hook to auto-capture commands
+- ~~`pad <cmd>`~~ - DONE. Shell wrapper with `source = "command"`
+- ~~zsh/bash preexec hook to auto-capture commands~~ - DONE. `pad-preexec` in pad.bash
 - Fish shell integration
-- `pad --recall <pattern>` - find past command outputs
+- ~~`pad --recall <pattern>`~~ - DONE. Search past command outputs
 
 ## Edges
 
@@ -79,4 +79,4 @@
 - email (mbox, notmuch)
 - rss/atom feeds
 - file watcher (inotify)
-- screenshots (ocr → text object)
+- screenshots (ocr -> text object)

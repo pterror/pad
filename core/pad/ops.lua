@@ -72,6 +72,26 @@ function mod.find_by_hash(db, hash)
   return iter()
 end
 
+function mod.find_by_hash_prefix(db, prefix)
+  local iter = db:query("SELECT id FROM objects WHERE hash LIKE ? LIMIT 1;", prefix .. "%")
+  return iter()
+end
+
+function mod.delete_annotation(db, object_id, key, value)
+  db:execute(
+    "DELETE FROM annotations WHERE object_id = ? AND key = ? AND value = ?;",
+    object_id, key, value
+  )
+end
+
+function mod.age_cool_all(db, now, rate)
+  db:execute([[
+    UPDATE objects SET
+      coldness = MIN(1.0, coldness + (? - COALESCE(last_accessed_at, created_at)) / 86400.0 * ?)
+    WHERE coldness < 1.0;
+  ]], now, rate)
+end
+
 function mod.query(db, sql, ...)
   return db:query(sql, ...)
 end

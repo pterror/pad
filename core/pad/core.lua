@@ -138,6 +138,27 @@ function mod.get_object(id)
   return ops.fetch_object(db, id)
 end
 
+function mod.get_object_by_hash(prefix)
+  local id = ops.find_by_hash_prefix(db, prefix)
+  if not id then return nil end
+  return mod.get_object(id)
+end
+
+function mod.find_by_hash_prefix(prefix)
+  return ops.find_by_hash_prefix(db, prefix)
+end
+
+function mod.remove_annotation(opts)
+  if not opts.object_id then error("pad: remove_annotation requires object_id") end
+  if not opts.key then error("pad: remove_annotation requires key") end
+  if not opts.value then error("pad: remove_annotation requires value") end
+  ops.delete_annotation(db, opts.object_id, opts.key, opts.value)
+end
+
+function mod.recalculate_coldness()
+  ops.age_cool_all(db, os.time(), 0.01)
+end
+
 function mod.query(sql, ...)
   return ops.query(db, sql, ...)
 end
