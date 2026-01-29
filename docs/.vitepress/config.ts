@@ -3,6 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'pad',
   description: 'cognitive stdin sink',
+  base: '/pad/',
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/' },
@@ -25,7 +26,7 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/user/pad' },
+      { icon: 'github', link: 'https://github.com/pterror/pad' },
     ],
   },
 })
