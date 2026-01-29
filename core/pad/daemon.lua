@@ -191,6 +191,27 @@ end
 local function setup_http(ep, pad, port)
   port = port or 7778
   local json = require("dep.lunajson")
+  local chain = require("dep.http.router.chain")
+  local ok_web, web = pcall(require, "web")
+
+  -- status fallback (handles /status, and / when no web extension)
+  local function status_fallback(req, res)
+    if req.path == "/status" or req.path == "/" then
+      local result = dispatch.dispatch(pad, { action = "stats" })
+      res.headers["content-type"] = "application/json"
+      res.body = json.encode(result)
+      return true
+    end
+  end
+
+  local router
+  if ok_web then
+    router = chain.router(web.router(pad), status_fallback)
+    log("web extension loaded")
+  else
+    router = status_fallback
+  end
+
   local server = socket_server.server(function(client, state)
     if state then return state end -- already handled (upgraded to ws)
     local data = client:receive()
@@ -223,19 +244,24 @@ local function setup_http(ep, pad, port)
         return true -- mark as upgraded
       end
     end
-    -- regular HTTP
-    local body
-    if req.path == "/status" or req.path == "/" then
-      local result = dispatch.dispatch(pad, { action = "stats" })
-      body = json.encode(result)
+    -- regular HTTP - route request
+    local res = { status = 200, headers = {} }
+    if req.method == "OPTIONS" then
+      res.status = 204
+      res.body = ""
     else
-      body = json.encode({ ok = false, error = "not found" })
+      local matched = router(req, res)
+      if not matched then
+        res.status = 404
+        res.headers["content-type"] = "application/json"
+        res.body = json.encode({ ok = false, error = "not found" })
+      end
     end
-    local response = http_format.http_response_to_string({
-      status = 200,
-      headers = { ["content-type"] = "application/json" },
-      body = body,
-    })
+    -- CORS headers
+    res.headers["access-control-allow-origin"] = "*"
+    res.headers["access-control-allow-methods"] = "GET, POST, DELETE, OPTIONS"
+    res.headers["access-control-allow-headers"] = "Content-Type"
+    local response = http_format.http_response_to_string(res)
     client:send(response)
     client:close()
     return nil

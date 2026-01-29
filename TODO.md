@@ -25,44 +25,7 @@ Everything below is implemented and tested (58 tests passing):
 - **Unix socket IPC**: `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands via shared dispatch module. Actions: ingest, search, recent, show, stats, note, tag, untag
 - **HTTP/WebSocket listener**: Port 7778. HTTP serves JSON stats on `/` and `/status`. WebSocket upgrade uses same dispatch protocol as unix socket. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
 - **Dispatch module**: `pad/dispatch.lua` — shared JSON action routing used by both unix socket and WebSocket, with pcall error handling
-
-## Next: Web UI Extension (`pad --web`)
-
-Local web UI served from extensions/web/. This is an extension, not core.
-
-The HTTP server and WebSocket are already running on port 7778 as part of the daemon. The web UI would add:
-
-### API Endpoints
-
-```
-GET  /api/objects              # list objects (query params: ?search=, ?shape=, ?limit=)
-GET  /api/objects/:id          # get single object with annotations/edges
-GET  /api/events               # event timeline
-GET  /api/stats                # database stats
-GET  /api/urgent               # urgent items
-POST /api/ingest               # ingest content (body = content, headers for source/metadata)
-POST /api/objects/:id/tag      # add tag
-POST /api/objects/:id/note     # create linked note
-```
-
-### Frontend
-
-Static HTML + vanilla JS (no build step, no framework). Served from `extensions/web/static/`.
-
-Pages:
-- **Dashboard**: recent objects, urgent items, stats
-- **Search**: full-text search with results
-- **Object detail**: show object with annotations, edges, linked sketches
-- **Note input**: text area that POSTs to /api/ingest with source = "web"
-
-The frontend should be a single HTML file with embedded CSS/JS for simplicity. No npm, no bundler.
-
-### Implementation Plan
-
-1. Extend daemon's HTTP handler with path-based routing for `/api/*` endpoints
-2. Create `extensions/web/init.lua` — route handler calling `pad.core`
-3. Create `extensions/web/static/index.html` with the frontend
-4. Handlers call into `pad.core` for data (same API the CLI uses)
+- **Web UI extension**: `extensions/web/` — local web UI on daemon port 7778. Table router with chain composition, JSON API endpoints, single-file HTML frontend (dark terminal theme, vanilla JS, no build step). See `docs/api.md` for endpoint reference
 
 ## Low Priority / Future
 

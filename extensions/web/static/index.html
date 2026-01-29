@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pad</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0d1117; color: #c9d1d9; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 14px; line-height: 1.5; }
+a { color: #58a6ff; text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+
+nav { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 10; }
+nav .logo { font-weight: bold; font-size: 18px; color: #f0f6fc; letter-spacing: 1px; }
+nav a { color: #8b949e; font-size: 13px; }
+nav a.active { color: #f0f6fc; }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: #484f58; margin-left: auto; flex-shrink: 0; }
+.ws-dot.connected { background: #3fb950; }
+
+main { max-width: 900px; margin: 0 auto; padding: 16px; }
+
+.stats { display: flex; gap: 24px; padding: 12px 0; border-bottom: 1px solid #21262d; margin-bottom: 16px; flex-wrap: wrap; }
+.stat .value { font-size: 20px; font-weight: bold; color: #f0f6fc; }
+.stat .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+
+h2 { font-size: 14px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px; }
+
+.object-list { list-style: none; }
+.object-list li { padding: 8px 0; border-bottom: 1px solid #21262d; }
+.object-list li:hover { background: #161b22; }
+.object-list .meta { color: #8b949e; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.object-list .meta .id { color: #58a6ff; }
+.object-list .preview { color: #c9d1d9; white-space: pre-wrap; max-height: 48px; overflow: hidden; font-size: 13px; margin-top: 2px; }
+
+.shape { display: inline-block; background: #21262d; color: #8b949e; padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+
+.tag { display: inline-block; background: #1f6feb33; color: #58a6ff; padding: 1px 8px; border-radius: 12px; font-size: 11px; margin: 1px 2px; }
+.tag.urgent, .tag.action { background: #da363333; color: #f85149; }
+
+input[type="text"], textarea {
+  background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+  font-family: inherit; font-size: 14px; padding: 8px 12px;
+  border-radius: 6px; width: 100%; display: block;
+}
+input[type="text"]:focus, textarea:focus { outline: none; border-color: #58a6ff; }
+textarea { resize: vertical; min-height: 120px; }
+
+button {
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+  font-family: inherit; font-size: 13px; padding: 6px 16px;
+  border-radius: 6px; cursor: pointer; margin-top: 8px;
+}
+button:hover { background: #30363d; }
+button.primary { background: #238636; border-color: #2ea043; color: #fff; }
+button.primary:hover { background: #2ea043; }
+
+.detail-table { width: 100%; border-collapse: collapse; }
+.detail-table td { padding: 4px 8px; border-bottom: 1px solid #21262d; vertical-align: top; }
+.detail-table td:first-child { color: #8b949e; width: 120px; white-space: nowrap; }
+
+.payload { background: #161b22; border: 1px solid #30363d; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; max-height: 500px; overflow-y: auto; margin-top: 8px; font-size: 13px; }
+
+.edge-list { list-style: none; }
+.edge-list li { padding: 4px 0; font-size: 13px; }
+.edge-list .relation { color: #8b949e; }
+
+.empty { color: #484f58; font-style: italic; padding: 12px 0; }
+.error { color: #f85149; padding: 8px; }
+.loading { color: #484f58; padding: 16px 0; }
+
+.search-bar { margin-bottom: 16px; }
+
+.tag-input { display: inline-flex; gap: 4px; margin-top: 8px; }
+.tag-input input { width: 120px; padding: 4px 8px; font-size: 12px; }
+.tag-input button { margin-top: 0; padding: 4px 10px; font-size: 12px; }
+
+.back { margin-bottom: 12px; display: inline-block; font-size: 13px; }
+</style>
+</head>
+<body>
+<nav>
+  <span class="logo">pad</span>
+  <a href="#dashboard">dashboard</a>
+  <a href="#search">search</a>
+  <a href="#ingest">ingest</a>
+  <span class="ws-dot" id="ws-dot" title="WebSocket"></span>
+</nav>
+<main id="app"></main>
+
+<script>
+const $ = (s, el) => (el || document).querySelector(s);
+const $$ = (s, el) => [...(el || document).querySelectorAll(s)];
+const app = $('#app');
+
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const diff = (now - d) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function parseSketch(sketch) {
+  if (!sketch) return '';
+  try {
+    const s = JSON.parse(sketch);
+    return s.preview || sketch;
+  } catch (e) {
+    return sketch;
+  }
+}
+
+async function api(path, opts) {
+  try {
+    const res = await fetch(path, opts);
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// WebSocket
+let ws = null;
+function connectWS() {
+  try {
+    ws = new WebSocket('ws://' + location.host);
+    ws.onopen = () => { $('#ws-dot').classList.add('connected'); };
+    ws.onclose = () => {
+      $('#ws-dot').classList.remove('connected');
+      setTimeout(connectWS, 5000);
+    };
+    ws.onerror = () => { ws.close(); };
+  } catch (e) {}
+}
+connectWS();
+
+// Router
+function getRoute() {
+  const hash = location.hash.slice(1) || 'dashboard';
+  const parts = hash.split('/');
+  return { view: parts[0], id: parts[1] };
+}
+
+function updateNav() {
+  const { view } = getRoute();
+  $$('nav a').forEach(a => {
+    a.classList.toggle('active', a.hash === '#' + view);
+  });
+}
+
+function objectItem(obj) {
+  const preview = esc(parseSketch(obj.sketch)).slice(0, 120);
+  const tags = obj.tag ? `<span class="tag ${esc(obj.tag)}">${esc(obj.tag)}</span>` : '';
+  return `<li>
+    <div class="meta">
+      <a class="id" href="#object/${obj.id}">#${obj.id}</a>
+      <span class="shape">${esc(obj.shape)}</span>
+      ${tags}
+      <span>${esc(obj.hash ? obj.hash.slice(0, 8) : '')}</span>
+      <span>${formatBytes(obj.size || 0)}</span>
+      <span>${formatTime(obj.created_at)}</span>
+    </div>
+    <div class="preview">${preview}</div>
+  </li>`;
+}
+
+async function renderDashboard() {
+  app.innerHTML = '<div class="loading">loading...</div>';
+  const [stats, recent, urgent] = await Promise.all([
+    api('/api/stats'),
+    api('/api/objects?limit=20'),
+    api('/api/urgent'),
+  ]);
+  if (!stats.ok) { app.innerHTML = `<div class="error">${esc(stats.error)}</div>`; return; }
+
+  const urgentHtml = urgent.ok && urgent.results && urgent.results.length
+    ? `<h2>urgent</h2><ul class="object-list">${urgent.results.map(objectItem).join('')}</ul>`
+    : '';
+
+  const recentHtml = recent.ok && recent.results && recent.results.length
+    ? `<ul class="object-list">${recent.results.map(objectItem).join('')}</ul>`
+    : '<div class="empty">no objects yet</div>';
+
+  app.innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="value">${stats.objects || 0}</div><div class="label">objects</div></div>
+      <div class="stat"><div class="value">${stats.events || 0}</div><div class="label">events</div></div>
+      <div class="stat"><div class="value">${stats.edges || 0}</div><div class="label">edges</div></div>
+      <div class="stat"><div class="value">${formatBytes(stats.total_size || 0)}</div><div class="label">total size</div></div>
+    </div>
+    ${urgentHtml}
+    <h2>recent</h2>
+    ${recentHtml}
+  `;
+}
+
+let searchTimeout = null;
+async function renderSearch() {
+  const { id } = getRoute();
+  const q = decodeURIComponent(id || '');
+
+  app.innerHTML = `
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="search objects..." value="${esc(q)}">
+    </div>
+    <div id="search-results"></div>
+  `;
+
+  const input = $('#search-input');
+  input.focus();
+
+  async function doSearch() {
+    const term = input.value.trim();
+    const results = $('#search-results');
+    if (!term) { results.innerHTML = '<div class="empty">type to search</div>'; return; }
+    results.innerHTML = '<div class="loading">searching...</div>';
+    const data = await api('/api/objects?search=' + encodeURIComponent(term) + '&limit=50');
+    if (!data.ok) { results.innerHTML = `<div class="error">${esc(data.error)}</div>`; return; }
+    if (!data.results.length) { results.innerHTML = '<div class="empty">no results</div>'; return; }
+    results.innerHTML = `<ul class="object-list">${data.results.map(objectItem).join('')}</ul>`;
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(doSearch, 300);
+  });
+
+  if (q) doSearch();
+}
+
+async function renderObject(id) {
+  if (!id) { location.hash = '#dashboard'; return; }
+  app.innerHTML = '<div class="loading">loading...</div>';
+  const data = await api('/api/objects/' + encodeURIComponent(id));
+  if (!data.ok) { app.innerHTML = `<a class="back" href="#dashboard">&larr; back</a><div class="error">${esc(data.error)}</div>`; return; }
+
+  const obj = data.object;
+  const annotations = data.annotations || [];
+  const edges_from = data.edges_from || [];
+  const edges_to = data.edges_to || [];
+
+  const tags = annotations.filter(a => a.key === 'tag');
+  const otherAnnotations = annotations.filter(a => a.key !== 'tag');
+
+  const tagsHtml = tags.map(t =>
+    `<span class="tag ${esc(t.value)}">${esc(t.value)} <a onclick="removeTag(${obj.id},'${esc(t.value)}')" style="color:#8b949e;cursor:pointer">&times;</a></span>`
+  ).join('') || '<span class="empty">none</span>';
+
+  const edgesHtml = (edges_from.length + edges_to.length) > 0
+    ? `<ul class="edge-list">
+        ${edges_from.map(e => `<li><span class="relation">${esc(e.relation)}</span> &rarr; <a href="#object/${e.to_id}">#${e.to_id}</a></li>`).join('')}
+        ${edges_to.map(e => `<li><a href="#object/${e.from_id}">#${e.from_id}</a> &rarr; <span class="relation">${esc(e.relation)}</span></li>`).join('')}
+      </ul>`
+    : '<div class="empty">none</div>';
+
+  const annHtml = otherAnnotations.length
+    ? `<table class="detail-table">${otherAnnotations.map(a => `<tr><td>${esc(a.key)}</td><td>${esc(a.value)}</td></tr>`).join('')}</table>`
+    : '<div class="empty">none</div>';
+
+  const content = obj.payload || parseSketch(obj.sketch);
+
+  app.innerHTML = `
+    <a class="back" href="#dashboard">&larr; back</a>
+    <h2>object #${obj.id}</h2>
+    <table class="detail-table">
+      <tr><td>hash</td><td>${esc(obj.hash)}</td></tr>
+      <tr><td>shape</td><td><span class="shape">${esc(obj.shape)}</span></td></tr>
+      <tr><td>tier</td><td>${esc(obj.tier)}</td></tr>
+      <tr><td>size</td><td>${formatBytes(obj.size || 0)}</td></tr>
+      <tr><td>coldness</td><td>${(obj.coldness || 0).toFixed(3)}</td></tr>
+      <tr><td>accesses</td><td>${obj.access_count || 0}</td></tr>
+      <tr><td>created</td><td>${formatTime(obj.created_at)}</td></tr>
+    </table>
+
+    <h2>tags</h2>
+    <div>${tagsHtml}</div>
+    <div class="tag-input">
+      <input type="text" id="tag-input" placeholder="new tag">
+      <button onclick="addTag(${obj.id})">add</button>
+    </div>
+
+    <h2>annotations</h2>
+    ${annHtml}
+
+    <h2>edges</h2>
+    ${edgesHtml}
+
+    <h2>content</h2>
+    <div class="payload">${esc(content)}</div>
+
+    <h2>note</h2>
+    <div style="margin-top:4px">
+      <textarea id="note-text" rows="3" placeholder="add a note..."></textarea>
+      <button onclick="addNote(${obj.id})">add note</button>
+    </div>
+  `;
+}
+
+async function addTag(id) {
+  const input = $('#tag-input');
+  const tag = input.value.trim();
+  if (!tag) return;
+  await api('/api/objects/' + id + '/tag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag }),
+  });
+  renderObject(id);
+}
+
+async function removeTag(id, tag) {
+  await api('/api/objects/' + id + '/tag', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag }),
+  });
+  renderObject(id);
+}
+
+async function addNote(id) {
+  const textarea = $('#note-text');
+  const text = textarea.value.trim();
+  if (!text) return;
+  await api('/api/objects/' + id + '/note', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  textarea.value = '';
+  renderObject(id);
+}
+
+async function renderIngest() {
+  app.innerHTML = `
+    <h2>ingest content</h2>
+    <textarea id="ingest-content" placeholder="paste or type content to ingest..."></textarea>
+    <button class="primary" onclick="doIngest()">ingest</button>
+    <div id="ingest-result"></div>
+  `;
+  $('#ingest-content').focus();
+}
+
+async function doIngest() {
+  const textarea = $('#ingest-content');
+  const content = textarea.value;
+  if (!content) return;
+  const result = await api('/api/ingest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  const el = $('#ingest-result');
+  if (result.ok) {
+    el.innerHTML = `<div style="margin-top:8px">ingested as <a href="#object/${result.id}">#${result.id}</a> (${esc(result.hash ? result.hash.slice(0, 8) : '')})</div>`;
+    textarea.value = '';
+  } else {
+    el.innerHTML = `<div class="error">${esc(result.error)}</div>`;
+  }
+}
+
+function route() {
+  updateNav();
+  const { view, id } = getRoute();
+  if (view === 'search') renderSearch();
+  else if (view === 'object') renderObject(id);
+  else if (view === 'ingest') renderIngest();
+  else renderDashboard();
+}
+
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
