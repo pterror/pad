@@ -27,17 +27,25 @@ When pad is run without TTY and without stdin, it should become a daemon. This i
 
 ### Event Loop
 
-LuaJIT has no built-in event loop. Options:
+Prior art at `~/git/lua/dep/epoll.lua`: ~200-line epoll wrapper with fd management, read/write/close callbacks, weak fds, and cross-platform support (wepoll.dll on Windows). Clean API:
 
-1. **luv (libuv bindings)** - Mature, well-tested. Provides timers, file watchers, TCP/UDP, signals. Available via luarocks. This is the most practical choice. The FFI overhead is minimal.
+- `epoll:add(fd, read_cb, close_cb, weak)` → returns `write`, `remove`
+- `epoll:modify(fd, read_cb, close_cb)` → swap callbacks on existing fd
+- `epoll:wait()` → single event dispatch (EPOLLIN, EPOLLOUT, EPOLLHUP, EPOLLRDHUP)
+- `epoll:loop()` → `while count > 0 do wait() end`
 
-2. **epoll via FFI** - Roll our own with `ffi.cdef` for epoll_create, epoll_ctl, epoll_wait. Minimal dependencies but significant work: need to handle fd management, timers, signal handling manually. Only works on Linux.
+This is the right approach. The daemon blocks on `epoll_wait` and wakes only when something happens — no busy-loop CPU burn, no sleep/poll cycles. On Linux, epoll handles everything pad needs: sockets, timerfd, inotify, signalfd. Windows support via wepoll (dlls at `~/git/lua/dep/wepoll*`).
 
-3. **select() via FFI** - Simpler than epoll, cross-platform, but limited to 1024 fds and no inotify integration.
+Timers use `timerfd_create` via FFI — each timer is just another fd in the epoll set:
 
-4. **Busy loop with sleep** - Simplest: `while true do check_clipboard(); check_files(); vacuum(); ffi.C.sleep(interval) end`. No real concurrency but might be enough for pad's use case. Clipboard polling every 2s, file stat checks, periodic vacuum.
+```lua
+ffi.cdef[[
+  int timerfd_create(int clockid, int flags);
+  int timerfd_settime(int fd, int flags, const struct itimerspec *new, struct itimerspec *old);
+]]
+```
 
-Recommendation: start with option 4 (busy loop). It's simple, has no dependencies, and pad's daemon workload is light. If it proves insufficient, migrate to luv.
+Prior art at `~/git/lua/lib/websocket.lua`: RFC 6455 websocket implementation that integrates directly with the epoll module (takes an `epoll` instance, uses `epoll:modify`). Handles upgrade handshake, frame encode/decode, masking, continuation frames, ping/pong, close. This enables WebSocket IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
 
 ### Daemon Lifecycle
 
@@ -52,24 +60,51 @@ PID file at `$PAD_DIR/pad.pid`. Daemon writes log to `$PAD_DIR/pad.log`.
 
 ### Daemon Tasks
 
-The daemon runs a loop with these periodic tasks:
+The daemon's epoll set contains these fds:
 
-1. **Clipboard watch** (every 2s) - Read clipboard via extensions/clipboard, compare hash to last seen. If different, ingest with `source = "clipboard"`. Dedup handles repeated copies.
+1. **Clipboard timerfd** (every 2s) - Read clipboard via extensions/clipboard, compare hash to last seen. If different, ingest with `source = "clipboard"`. Dedup handles repeated copies.
 
-2. **File watch** (every 5s or inotify) - Check registered watch paths for changes. Ingest changed files with `source = "file:watch"`. Watch paths configured via `pad --watch /path/to/file`.
+2. **File watch** (inotify fd, or timerfd fallback every 5s) - Watch registered paths for changes. Ingest changed files with `source = "file:watch"`. Watch paths configured via `pad --watch /path/to/file`. inotify fds slot directly into epoll.
 
-3. **Vacuum** (every 1h) - Run `pad.recalculate_coldness()`.
+3. **Vacuum timerfd** (every 1h) - Run `pad.recalculate_coldness()`.
 
-4. **Socket listener** (optional) - Unix socket at `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands: `{"action": "ingest", "content": "...", "source": "..."}`. This lets other tools feed into pad programmatically without spawning a process.
+4. **Unix socket** - `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands: `{"action": "ingest", "content": "...", "source": "..."}`. Lets other tools feed into pad without spawning a process. Accept fd goes in epoll, each client connection added as a new fd.
+
+5. **WebSocket listener** (optional) - HTTP server on localhost that upgrades to WebSocket using `~/git/lua/lib/websocket.lua`. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc. Same epoll instance — the websocket module already integrates via `epoll:modify`.
+
+### Vendoring
+
+Copy from `~/git/lua/` into pad's `dep/`:
+
+```
+dep/epoll.lua              ← dep/epoll.lua
+dep/inotify.lua            ← dep/inotify.lua       (file watcher, epoll-native)
+dep/ljsocket.lua           ← dep/ljsocket.lua
+dep/sha1.lua               ← dep/sha1.lua          (websocket needs it)
+dep/base64.lua             ← dep/base64.lua         (websocket needs it)
+dep/wepoll.dll             ← dep/wepoll.dll         (Windows epoll shim)
+dep/wepoll32.dll           ← dep/wepoll32.dll       (Windows 32-bit)
+dep/http/format.lua        ← lib/http/format.lua   (request/response parse)
+dep/http/server.lua        ← lib/http/server.lua   (HTTP server)
+dep/http/status.lua        ← lib/http/status.lua   (status code names)
+dep/socket/server.lua      ← lib/socket/server.lua (TCP server)
+dep/websocket.lua          ← lib/websocket.lua     (WebSocket upgrade)
+dep/urlencode.lua          ← lib/urlencode.lua     (URL decoding)
+dep/utf8.lua               ← lib/utf8.lua          (websocket UTF-8 validation)
+```
+
+Require paths need adjusting after copy (e.g. `require("lib.http.format")` → `require("dep.http.format")`).
 
 ### Implementation Plan
 
-1. Add `ops.lua`: daemon PID file ops (write_pid, read_pid, clear_pid)
-2. Add `core/pad/daemon.lua`: daemon lifecycle (start, stop, status, main loop)
-3. Wire into pad.lua: `--daemon` flag dispatch
-4. Clipboard watch: use existing extensions/clipboard/init.lua, add `last_hash` state
-5. File watch: new `extensions/watch/init.lua` using `os.execute("stat ...")` for polling, or inotify FFI for event-driven
-6. Socket: `ffi.cdef` for socket/bind/listen/accept/read, or skip for v1
+1. Vendor the above files, fix require paths
+2. Add `ops.lua`: daemon PID file ops (write_pid, read_pid, clear_pid)
+3. Add `core/pad/daemon.lua`: daemon lifecycle (start, stop, status, main loop with epoll)
+4. Wire into pad.lua: `--daemon` flag dispatch
+5. Clipboard watch: timerfd in epoll, use existing extensions/clipboard/init.lua, `last_hash` state
+6. File watch: inotify fd in epoll (fall back to timerfd + stat polling)
+7. Unix socket: ljsocket bind + epoll:add for accept, each client fd added to epoll
+8. WebSocket listener: http/server.lua + websocket.lua on the daemon's epoll instance
 
 ### Daemonization in LuaJIT
 
@@ -93,54 +128,19 @@ ffi.C.setsid()                   -- new session
 
 ## Next: File Watcher Extension
 
-Depends on daemon mode for continuous watching. Two approaches:
+Depends on daemon mode for continuous watching.
 
-### Polling (no dependencies)
-
-```lua
--- extensions/watch/init.lua
-local mod = {}
-local watched = {}  -- path -> { mtime, size }
-
-function mod.add(path)
-  local attr = lfs.attributes(path) -- or os.execute("stat ...")
-  watched[path] = { mtime = attr.modification, size = attr.size }
-end
-
-function mod.check()
-  local changed = {}
-  for path, prev in pairs(watched) do
-    local attr = lfs.attributes(path)
-    if attr and (attr.modification ~= prev.mtime or attr.size ~= prev.size) then
-      changed[#changed + 1] = path
-      prev.mtime = attr.modification
-      prev.size = attr.size
-    end
-  end
-  return changed
-end
-```
-
-### inotify via FFI (Linux only, event-driven)
+Prior art at `~/git/lua/dep/inotify.lua`: inotify wrapper that takes an `epoll` instance in its constructor and adds the inotify fd directly to the epoll set. Handles event parsing (variable-length `inotify_event` structs), per-watch callbacks, and watch removal. Full event mask enum included.
 
 ```lua
-ffi.cdef[[
-  int inotify_init(void);
-  int inotify_add_watch(int fd, const char *pathname, uint32_t mask);
-  int inotify_rm_watch(int fd, int wd);
-  typedef struct { int wd; uint32_t mask; uint32_t cookie; uint32_t len; char name[]; } inotify_event;
-]]
-
-local IN_MODIFY = 0x00000002
-local IN_CREATE = 0x00000100
-local IN_DELETE = 0x00000200
-
-local fd = ffi.C.inotify_init()
-local wd = ffi.C.inotify_add_watch(fd, "/path/to/watch", bit.bor(IN_MODIFY, IN_CREATE))
--- read events from fd in the daemon loop
+local inotify = require("dep.inotify")
+local watcher = inotify.new(epoll)
+local wd, remove = watcher:add("/path/to/file", inotify.event_mask.IN_MODIFY, function(event)
+  -- ingest changed file
+end)
 ```
 
-Recommendation: start with polling. It works everywhere, is simpler, and pad's file watch use case (monitoring a handful of files) doesn't need inotify's efficiency.
+This is the primary approach. For non-Linux platforms, fall back to timerfd + stat polling.
 
 ### CLI Integration
 
@@ -158,15 +158,13 @@ Local web UI served from extensions/web/. This is an extension, not core.
 
 ### HTTP Server
 
-LuaJIT options for HTTP serving:
+Prior art at `~/git/lua/lib/http/` — full HTTP/1.1 stack already built on the same epoll + ljsocket foundation:
 
-1. **Pure Lua HTTP** - Parse HTTP/1.1 requests manually over TCP sockets. LuaJIT's FFI makes raw sockets straightforward. A minimal server is ~150 lines: socket(), bind(), listen(), accept(), read request line + headers, route, write response. No dependencies.
+- `lib/http/format.lua` — request/response parse and serialize (handles methods, headers, query params, URL decoding)
+- `lib/http/server.lua` — HTTP server wrapping `lib/socket/server.lua`, takes an optional `epoll` instance
+- `lib/websocket.lua` — WebSocket upgrade handler, integrates via `epoll:modify`
 
-2. **luv + http-parser** - If we adopt luv for daemon mode, use its TCP server with a lightweight HTTP parser.
-
-3. **Embed a C server via FFI** - Link against mongoose or microhttpd. Heavier dependency but battle-tested HTTP handling.
-
-Recommendation: pure Lua HTTP via FFI sockets. Pad only serves localhost, handles low traffic, and doesn't need HTTPS or HTTP/2. A minimal implementation is sufficient and keeps dependencies at zero.
+Vendor these into `dep/` alongside epoll.lua and ljsocket. The HTTP server shares the daemon's epoll instance — `--web` just adds a listener fd to the same loop. WebSocket support comes for free, enabling live-push to browser/extension clients.
 
 ### API Endpoints
 
@@ -195,10 +193,11 @@ The frontend should be a single HTML file with embedded CSS/JS for simplicity. N
 
 ### Implementation Plan
 
-1. Create `extensions/web/init.lua` with minimal HTTP server (FFI sockets)
-2. Create `extensions/web/router.lua` mapping routes to handler functions
-3. Create `extensions/web/static/index.html` with the frontend
-4. Handlers call into `pad.core` for data (same API the CLI uses)
+1. HTTP server + WebSocket already vendored in `dep/` from daemon mode setup
+2. Create `extensions/web/init.lua` — route handler calling `pad.core`, starts HTTP server on the daemon's epoll
+3. Create `extensions/web/router.lua` mapping routes to handler functions
+4. Create `extensions/web/static/index.html` with the frontend
+5. Handlers call into `pad.core` for data (same API the CLI uses)
 5. Wire `--web [port]` flag in pad.lua (default port 7778)
 
 ## Low Priority / Future
