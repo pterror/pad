@@ -4,7 +4,7 @@
 PAD_CORE="${PAD_CORE:-$HOME/git/pad/core}"
 
 pad() {
-  (cd "$PAD_CORE" && luajit pad.lua "$@")
+  (PAD_CWD="$PWD" cd "$PAD_CORE" && luajit pad.lua "$@")
 }
 
 # aliases for common flags

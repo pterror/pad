@@ -21,8 +21,12 @@ usage:
 ]]
 
 package.path = package.path .. ";./?.lua;./?/init.lua"
+package.path = package.path .. ";../extensions/?.lua;../extensions/?/init.lua"
 
 local pad = require("pad.core")
+local unwrap = require("pad.unwrap")
+local ok_parsers, parsers = pcall(require, "parsers")
+if not ok_parsers then parsers = nil end
 
 local function is_tty()
   local _, code = os.execute("test -t 0")
@@ -302,15 +306,36 @@ local function main(args)
   elseif #cmd_args > 0 then
     -- shell wrapper: run command, capture output, log event
     local full_cmd = table.concat(cmd_args, " ")
+    local real_args, wrappers = unwrap.unwrap(cmd_args)
+    local real_cmd = table.concat(real_args, " ")
+    local base = unwrap.base_command(real_args)
+
     local handle = io.popen(full_cmd .. " 2>&1")
     if handle then
       local output = handle:read("*a")
       handle:close()
       if output and #output > 0 then
-        pad.ingest(output, {
+        -- check for parser
+        local parsed = parsers and base and parsers.parse(base, output, real_args)
+
+        local meta
+        if #wrappers > 0 then
+          meta = { full_command = full_cmd, wrapper = table.concat(wrappers, ", ") }
+        end
+
+        local id, hash = pad.ingest(output, {
           source = "command",
-          command = full_cmd,
+          command = real_cmd,
+          shape = parsed and parsed.shape or nil,
+          metadata = meta,
         })
+
+        -- apply parser annotations
+        if parsed and parsed.annotations then
+          for k, v in pairs(parsed.annotations) do
+            if v then pad.annotate({ object_id = id, key = k, value = v }) end
+          end
+        end
       end
       io.write(output)
     end

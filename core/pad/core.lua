@@ -79,7 +79,7 @@ end
 function mod.create_event(opts)
   validate.source(opts.source)
   local now = os.time()
-  local cwd = opts.cwd or get_cwd()
+  local cwd = opts.cwd or os.getenv("PAD_CWD") or get_cwd()
   local event_id = ops.insert_event(db, now, cwd, opts.command, opts.source)
   if opts.metadata then
     for k, v in pairs(opts.metadata) do
