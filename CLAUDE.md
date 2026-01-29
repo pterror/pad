@@ -7,9 +7,12 @@ Instructions for Claude Code in the pad repository.
 pad is a stdin sink that captures and structures text. Users pipe data into it, and it gets stored in a local SQLite database as linked objects.
 
 ```bash
-echo "hello" | pad
-ls -la | pad
-pad query "hello"
+echo "hello" | pad           # ingest from stdin
+pad ls -la                   # shell wrapper (captures output)
+pad --search "hello"         # search objects
+pad --recent                 # recent captures
+pad --show 5                 # display object by id or hash prefix
+pad --note "remember this"   # quick note
 ```
 
 ## Code Style
@@ -20,26 +23,60 @@ Write readable, approachable, hackable code. New contributors should understand 
 
 ```
 core/                    -- main library
-  pad.lua               -- entry point
+  pad.lua               -- entry point, CLI flag dispatch
   pad/
-    core.lua            -- data model, limits
+    core.lua            -- composed operations (public API)
+    ops.lua             -- atomic DB mutations (only code that writes)
+    validate.lua        -- pure invariant enforcement (no side effects)
     schema.lua          -- database tables
-  dep/                  -- bundled dependencies (luajit, sqlite)
+    unwrap.lua          -- command prefix stripping (nix, sudo, time, etc.)
+  dep/                  -- bundled dependencies (luajit, sqlite, xxhash, json)
 
 extensions/             -- integrations with other tools
-  clipboard/
-  shell/
-  browser/
-  ...
+  parsers/              -- output format plugins (rg, ls, grep, jq, tree)
+  shell/                -- bash/zsh integration
+  clipboard/            -- (not yet implemented)
+  browser/              -- (not yet implemented)
 ```
 
-Extensions are separate packages that call into core. Each extension passes a `source` parameter so pad knows where data came from:
+### Primitives Architecture
 
-```lua
-pad.ingest(content, { source = "clipboard" })
-pad.ingest(content, { source = "browser", url = "..." })
-pad.ingest(content, { source = "git:commit", hash = "..." })
+**All structural meaning is expressed as first-class PAD primitives (ops + validators), not ad-hoc Lua mutations.** Lua scripts may compose and sequence these primitives, but must not define invariants, schemas, or state structure themselves.
+
+Three layers:
+
+1. **ops.lua** - Atomic state mutations. Single SQL statements. No validation, no composition. The _only_ code that writes to the database.
+2. **validate.lua** - Pure invariant enforcement. No side effects, no database access. These define what is structurally valid.
+3. **core.lua** - Composed operations. Sequences ops + validators into the public API. This is what extensions and the CLI call.
+
+When adding new functionality: define the op, define the validator (if needed), compose them in core. Never write SQL outside ops.lua.
+
+### CLI Convention
+
+- `pad --flag` = pad's own features (flags namespace)
+- `pad <cmd> [args]` = shell wrapper (bare args = command to execute)
+
+Everything pad does uses flags. Bare words are passed to shell. This means `pad ls` runs `ls` and captures its output, not a pad subcommand.
+
+### Command Unwrapping
+
+`unwrap.lua` recursively strips wrapper prefixes to find the real command:
+
 ```
+pad time sudo nix run nixpkgs#ripgrep -- rg foo
+     ^^^^                                         → wrapper: time
+          ^^^^                                    → wrapper: sudo
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^        → wrapper: nix run
+                                           ^^^^^^ → real command: rg foo
+```
+
+The event records `command = "rg foo"` with annotations `full_command` and `wrapper`. The base command (`rg`) is used for parser dispatch.
+
+### Output Parsers
+
+Extensions in `extensions/parsers/`. Each parser is a function `(output, args) → { shape, annotations }`. Parsers add structured metadata to objects (tool name, match counts, etc.) but never modify core behavior.
+
+To add a new parser: create `extensions/parsers/foo.lua` returning a function, register it in `extensions/parsers/init.lua`.
 
 ## Data Model
 
@@ -49,6 +86,15 @@ Four tables:
 - `objects` - the actual content, content-addressed by hash
 - `edges` - links between objects
 - `annotations` - key/value metadata on events or objects
+
+### Dedup Provenance
+
+When duplicate content arrives, pad:
+1. Warms the existing object (reduces coldness)
+2. Creates a new event (so provenance is never lost)
+3. Annotates the event with `dedup_object_id` pointing to the existing object
+
+This means every source interaction is recorded, even for content we've seen before.
 
 ## Rules
 
@@ -77,4 +123,6 @@ These constraints prevent pad from becoming bloated:
 - Store objects without provenance
 - Store duplicate content
 - Parse specific formats in core
+- Write SQL outside ops.lua
+- Define invariants outside validate.lua
 - Use `--no-verify` on commits
