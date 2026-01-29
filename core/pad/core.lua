@@ -1,10 +1,10 @@
 --[[
-pad core - the heart
+pad core - compositions of primitives
 
-rules enforced here:
+rules enforced via ops + validators:
 1. capture is tiered (event/sketch/full)
 2. content is content-addressed and deduped
-3. budgets are enforced in core
+3. budgets are enforced by validators
 4. every object has provenance
 5. coldness exists
 ]]
@@ -14,53 +14,48 @@ local json = require("dep.lunajson")
 local schema = require("pad.schema")
 local get_cwd = require("dep.get_cwd").get_cwd
 local xxhash = require("dep.xxhash")
+local ops = require("pad.ops")
+local validate = require("pad.validate")
 
 local mod = {}
 
--- budgets (enforced in core, not trusted to plugins)
+-- budgets (enforced by validators)
 mod.budgets = {
   max_objects_per_event = 1000,
   max_edges_per_event = 5000,
-  max_payload_bytes = 1024 * 1024,  -- 1MB before sketch-only
+  max_payload_bytes = 1024 * 1024,
   max_ms_per_event = 5000,
 }
 
 -- tier thresholds
 mod.tiers = {
-  sketch_threshold = 4096,  -- bytes above which we only keep sketch by default
+  sketch_threshold = 4096,
 }
 
+-- warmth deltas
+mod.warmth = {
+  on_access = 0.1,
+  on_dedup = 0.05,
+}
+
+-- database
 local dir = os.getenv("PAD_DIR") or (os.getenv("HOME") .. "/.pad")
 local db_path = dir .. "/pad.db"
-
--- ensure directory exists
 os.execute("mkdir -p " .. dir)
-
 local db = sqlite.open(db_path)
-if not db then
-  error("pad: could not open database at " .. db_path)
-end
-
+if not db then error("pad: could not open database at " .. db_path) end
 mod.db = db
-
--- init schema
 db:execute(schema.init_sql)
 
---[[@param data string]]
---[[@return string hash 16 hex chars]]
-local function hash_content(data)
+-- pure functions (no state, no db)
+
+function mod.hash(data)
   return xxhash.hash(data)
 end
 
---[[@param content string]]
---[[@param size integer]]
---[[@return string sketch]]
-local function make_sketch(content, size)
-  -- first 256 chars + metadata
+function mod.make_sketch(content, size)
   local preview = content:sub(1, 256)
-  if size > 256 then
-    preview = preview .. "..."
-  end
+  if size > 256 then preview = preview .. "..." end
   return json.encode({
     preview = preview,
     size = size,
@@ -68,228 +63,83 @@ local function make_sketch(content, size)
   })
 end
 
---[[@param content string]]
---[[@return string shape]]
-local function detect_shape(content)
-  -- simple heuristics for shape detection
-  local first_char = content:sub(1, 1)
+function mod.detect_shape(content)
   local trimmed = content:match("^%s*(.-)%s*$")
-
-  if trimmed:match("^%[") and trimmed:match("%]$") then
-    return "list"
-  elseif trimmed:match("^{") and trimmed:match("}$") then
-    return "object"
-  elseif content:match("\t") and content:match("\n") then
-    return "table"
-  elseif content:match("^%d%d%d%d%-%d%d%-%d%d") or content:match("%[%d+%]") or content:match("^%w+ %d+ %d+:%d+") then
-    return "log"
-  elseif content:match("^/") or content:match("^%a:\\") or content:match("^file://") then
-    return "path"
-  elseif content:match("^https?://") then
-    return "url"
-  else
-    return "text"
-  end
+  if trimmed:match("^%[") and trimmed:match("%]$") then return "list"
+  elseif trimmed:match("^{") and trimmed:match("}$") then return "object"
+  elseif content:match("\t") and content:match("\n") then return "table"
+  elseif content:match("^%d%d%d%d%-%d%d%-%d%d") or content:match("%[%d+%]") or content:match("^%w+ %d+ %d+:%d+") then return "log"
+  elseif content:match("^/") or content:match("^%a:\\") or content:match("^file://") then return "path"
+  elseif content:match("^https?://") then return "url"
+  else return "text" end
 end
 
---[[
-Create an event (provenance record)
+-- composed operations
 
-@param opts table
-  - source: string (required) - 'stdin' | 'clipboard' | 'browser' | 'git:commit' | etc
-  - cwd: string (optional)
-  - command: string (optional)
-  - url: string (optional) - for browser source
-  - metadata: table (optional) - additional provenance data
-@return integer event_id
-]]
 function mod.create_event(opts)
-  if not opts.source then
-    error("pad: event requires source (invariant: no orphan provenance)")
-  end
-
-  local cwd = opts.cwd or get_cwd()
+  validate.source(opts.source)
   local now = os.time()
-
-  db:execute(
-    "INSERT INTO events (created_at, cwd, command, source) VALUES (?, ?, ?, ?);",
-    now, cwd, opts.command, opts.source
-  )
-
-  local event_id = db:last_insert_rowid()
-
-  -- store extra metadata as annotations
+  local cwd = opts.cwd or get_cwd()
+  local event_id = ops.insert_event(db, now, cwd, opts.command, opts.source)
   if opts.metadata then
     for k, v in pairs(opts.metadata) do
-      db:execute(
-        "INSERT INTO annotations (event_id, key, value, created_at) VALUES (?, ?, ?, ?);",
-        event_id, k, tostring(v), now
-      )
+      ops.insert_annotation(db, event_id, nil, k, tostring(v), now)
     end
   end
-
   return event_id
 end
 
---[[
-Ingest content into pad
-
-@param content string - raw content
-@param opts table
-  - source: string (required) - identifies the tendril
-  - force_full: boolean - override tier policy
-  - shape: string - override shape detection
-  - (plus any event opts)
-@return integer object_id, string hash
-]]
 function mod.ingest(content, opts)
   opts = opts or {}
-
-  if not opts.source then
-    error("pad: ingest requires source (invariant: every object needs provenance)")
-  end
-
-  local size = #content
-  local content_hash = hash_content(content)
-
-  -- dedup check (invariant 2)
-  local existing = db:query("SELECT id FROM objects WHERE hash = ?;", content_hash)
-  local existing_id = existing()
-  if existing_id then
-    -- content seen again - warm it up (reduce coldness)
-    db:execute([[
-      UPDATE objects SET
-        last_accessed_at = ?,
-        access_count = access_count + 1,
-        coldness = MAX(0, coldness - 0.05)
-      WHERE id = ?;
-    ]], os.time(), existing_id)
-    return existing_id, content_hash
-  end
-
-  -- create event
-  local event_id = mod.create_event(opts)
-
-  -- determine tier (invariant 1)
-  local tier = "full"
-  local payload = content
-
-  if size > mod.budgets.max_payload_bytes then
-    -- hard budget: sketch only, emit warning
-    tier = "sketch"
-    payload = nil
-    db:execute(
-      "INSERT INTO annotations (event_id, key, value, created_at) VALUES (?, ?, ?, ?);",
-      event_id, "warning", "truncated_by_budget:max_payload_bytes", os.time()
-    )
-  elseif size > mod.tiers.sketch_threshold and not opts.force_full then
-    -- soft threshold: sketch unless overridden
-    tier = "sketch"
-    payload = nil
-  end
-
-  -- detect shape (invariant 3: core classifies shapes, not formats)
-  local shape = opts.shape or detect_shape(content)
-
-  -- create sketch (always)
-  local sketch = make_sketch(content, size)
-
-  -- insert object
-  db:execute([[
-    INSERT INTO objects (hash, event_id, tier, shape, sketch, payload, size, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-  ]], content_hash, event_id, tier, shape, sketch, payload, size, os.time())
-
-  return db:last_insert_rowid(), content_hash
-end
-
---[[
-Create an edge between objects
-
-@param from_id integer
-@param to_id integer
-@param relation string - 'derived_from' | 'contains' | 'references' | etc
-@param event_id integer - provenance
-@return integer edge_id
-]]
-function mod.link(from_id, to_id, relation, event_id)
-  if not event_id then
-    error("pad: edge requires event_id (invariant: every derived object must be attributable)")
-  end
-
-  db:execute([[
-    INSERT INTO edges (event_id, from_id, to_id, relation, created_at)
-    VALUES (?, ?, ?, ?, ?);
-  ]], event_id, from_id, to_id, relation, os.time())
-
-  return db:last_insert_rowid()
-end
-
---[[
-Annotate an object or event
-
-@param opts table
-  - object_id: integer (optional)
-  - event_id: integer (optional)
-  - key: string (required)
-  - value: string (required)
-]]
-function mod.annotate(opts)
-  if not opts.object_id and not opts.event_id then
-    error("pad: annotation requires object_id or event_id")
-  end
-
-  db:execute([[
-    INSERT INTO annotations (event_id, object_id, key, value, created_at)
-    VALUES (?, ?, ?, ?, ?);
-  ]], opts.event_id, opts.object_id, opts.key, opts.value, os.time())
-end
-
---[[
-Retrieve an object by id, warming it in the process
-
-@param id integer
-@return table|nil object
-]]
-function mod.get_object(id)
+  validate.source(opts.source)
   local now = os.time()
+  local size = #content
+  local hash = mod.hash(content)
 
-  -- warm on access
-  db:execute([[
-    UPDATE objects SET
-      last_accessed_at = ?,
-      access_count = access_count + 1,
-      coldness = MAX(0, coldness - 0.1)
-    WHERE id = ?;
-  ]], now, id)
+  -- dedup: warm existing, always record provenance
+  local existing_id = ops.find_by_hash(db, hash)
+  if existing_id then
+    ops.warm_object(db, existing_id, mod.warmth.on_dedup, now)
+    local event_id = mod.create_event(opts)
+    ops.insert_annotation(db, event_id, nil, "dedup_object_id", tostring(existing_id), now)
+    return existing_id, hash
+  end
 
-  -- fetch and return
-  local iter = db:query([[
-    SELECT id, hash, tier, shape, sketch, payload, size, coldness, created_at
-    FROM objects WHERE id = ?;
-  ]], id)
+  -- tier decision
+  local tier, warning = validate.tier(size, opts.force_full, mod.tiers, mod.budgets)
+  local payload = tier == "full" and content or nil
 
-  local obj_id, hash, tier, shape, sketch, payload, size, coldness, created_at = iter()
-  if not obj_id then return nil end
+  -- shape + sketch
+  local shape = opts.shape or mod.detect_shape(content)
+  local sketch = mod.make_sketch(content, size)
 
-  return {
-    id = obj_id,
-    hash = hash,
-    tier = tier,
-    shape = shape,
-    sketch = sketch,
-    payload = payload,
-    size = size,
-    coldness = coldness,
-    created_at = created_at,
-  }
+  -- persist
+  local event_id = mod.create_event(opts)
+  if warning then
+    ops.insert_annotation(db, event_id, nil, "warning", warning, now)
+  end
+  local object_id = ops.insert_object(db, hash, event_id, tier, shape, sketch, payload, size, now)
+
+  return object_id, hash
 end
 
---[[
-Simple query interface
-]]
+function mod.link(from_id, to_id, relation, event_id)
+  validate.edge(from_id, to_id, relation, event_id)
+  return ops.insert_edge(db, event_id, from_id, to_id, relation, os.time())
+end
+
+function mod.annotate(opts)
+  validate.annotation(opts)
+  return ops.insert_annotation(db, opts.event_id, opts.object_id, opts.key, opts.value, os.time())
+end
+
+function mod.get_object(id)
+  ops.warm_object(db, id, mod.warmth.on_access, os.time())
+  return ops.fetch_object(db, id)
+end
+
 function mod.query(sql, ...)
-  return db:query(sql, ...)
+  return ops.query(db, sql, ...)
 end
 
 return mod
