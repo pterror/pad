@@ -25,6 +25,10 @@ usage:
   pad --git-log [n]          # capture recent git commits
   pad --git-diff [ref]       # capture git diff
   pad --git-status           # capture git status
+  pad --daemon               # start background daemon
+  pad --daemon --foreground  # run daemon in foreground
+  pad --daemon --stop        # stop daemon
+  pad --daemon --status      # check daemon status
 ]]
 
 package.path = package.path .. ";./?.lua;./?/init.lua"
@@ -32,6 +36,7 @@ package.path = package.path .. ";../extensions/?.lua;../extensions/?/init.lua"
 
 local pad = require("pad.core")
 local unwrap = require("pad.unwrap")
+local daemon = require("pad.daemon")
 local ok_parsers, parsers = pcall(require, "parsers")
 if not ok_parsers then parsers = nil end
 local ok_clip, clipboard = pcall(require, "clipboard")
@@ -423,6 +428,16 @@ local function do_git_status()
   io.stderr:write(string.format("pad: git status -> [%d] %s\n", id, hash))
 end
 
+local function do_daemon(flags)
+  if flags.stop then
+    daemon.stop()
+  elseif flags.status then
+    daemon.status()
+  else
+    daemon.run(pad, clipboard, flags.foreground)
+  end
+end
+
 -- main
 
 local function main(args)
@@ -466,6 +481,8 @@ local function main(args)
     do_git_diff(flags["git-diff"])
   elseif flags["git-status"] then
     do_git_status()
+  elseif flags.daemon then
+    do_daemon(flags)
   elseif #cmd_args > 0 then
     -- shell wrapper: run command, capture output, log event
     local full_cmd = table.concat(cmd_args, " ")

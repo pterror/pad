@@ -350,6 +350,47 @@ test("gc: gc_delete removes object", function()
   assert(not obj, "object should be deleted after gc_delete")
 end)
 
+-- daemon tests
+
+local daemon = require("pad.daemon")
+
+test("daemon: pid file write and read", function()
+  daemon.write_pid()
+  local pid = daemon.read_pid()
+  assert(pid, "should read PID")
+  assert(pid > 0, "PID should be positive")
+  daemon.clear_pid()
+end)
+
+test("daemon: clear_pid removes file", function()
+  daemon.write_pid()
+  daemon.clear_pid()
+  local pid = daemon.read_pid()
+  assert(pid == nil, "PID should be nil after clear")
+end)
+
+test("daemon: is_running false when no PID file", function()
+  daemon.clear_pid()
+  assert(not daemon.is_running(), "should not be running without PID file")
+end)
+
+test("daemon: is_running false for stale PID", function()
+  -- write a PID that definitely doesn't exist
+  local f = io.open(daemon.pid_path(), "w")
+  f:write("99999999")
+  f:close()
+  assert(not daemon.is_running(), "should not be running for stale PID")
+  daemon.clear_pid()
+end)
+
+test("daemon: timerfd creation", function()
+  local timerfd_create = ffi.C.timerfd_create
+  local CLOCK_MONOTONIC = 1
+  local fd = timerfd_create(CLOCK_MONOTONIC, 0)
+  assert(fd >= 0, "timerfd_create should succeed")
+  ffi.C.close(fd)
+end)
+
 -- cleanup
 os.execute("rm -rf " .. test_dir)
 
