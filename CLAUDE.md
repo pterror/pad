@@ -33,9 +33,10 @@ core/                    -- main library
   dep/                  -- bundled dependencies (luajit, sqlite, xxhash, json)
 
 extensions/             -- integrations with other tools
-  parsers/              -- output format plugins (rg, ls, grep, jq, tree)
+  parsers/              -- output format plugins (19 tools: rg, ls, grep, jq, tree, find, git, docker, curl, wget, make, cargo, npm, ps, top, df, du, sed, awk)
   shell/                -- bash/zsh integration
-  clipboard/            -- (not yet implemented)
+  clipboard/            -- clipboard capture (wl-paste, xclip, xsel, pbpaste)
+  git/                  -- git log/diff/status capture
   browser/              -- (not yet implemented)
 ```
 

@@ -92,6 +92,28 @@ function mod.age_cool_all(db, now, rate)
   ]], now, rate)
 end
 
+function mod.delete_object(db, id)
+  db:execute("DELETE FROM objects WHERE id = ?;", id)
+end
+
+function mod.delete_edges_for_object(db, id)
+  db:execute("DELETE FROM edges WHERE from_id = ? OR to_id = ?;", id, id)
+end
+
+function mod.delete_annotations_for_object(db, id)
+  db:execute("DELETE FROM annotations WHERE object_id = ?;", id)
+end
+
+function mod.count_objects_for_event(db, event_id)
+  local iter = db:query("SELECT COUNT(*) FROM objects WHERE event_id = ?;", event_id)
+  return iter()
+end
+
+function mod.count_edges_for_event(db, event_id)
+  local iter = db:query("SELECT COUNT(*) FROM edges WHERE event_id = ?;", event_id)
+  return iter()
+end
+
 function mod.query(db, sql, ...)
   return db:query(sql, ...)
 end

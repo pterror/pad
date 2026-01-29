@@ -125,6 +125,9 @@ end
 
 function mod.link(from_id, to_id, relation, event_id)
   validate.edge(from_id, to_id, relation, event_id)
+  validate.relation(relation)
+  local count = ops.count_edges_for_event(db, event_id)
+  validate.budget_edges(count, mod.budgets)
   return ops.insert_edge(db, event_id, from_id, to_id, relation, os.time())
 end
 
@@ -157,6 +160,64 @@ end
 
 function mod.recalculate_coldness()
   ops.age_cool_all(db, os.time(), 0.01)
+end
+
+function mod.create_sketch(object_id, content, opts)
+  opts = opts or {}
+  local source = opts.source or "sketch"
+  local size = #content
+  local hash = mod.hash(content)
+
+  local existing_id = ops.find_by_hash(db, hash)
+  if existing_id then
+    ops.warm_object(db, existing_id, mod.warmth.on_dedup, os.time())
+    return existing_id, hash
+  end
+
+  local event_id = mod.create_event({ source = source })
+  local sketch_sketch = mod.make_sketch(content, size)
+  local tier, warning = validate.tier(size, opts.force_full, mod.tiers, mod.budgets)
+  local payload = tier == "full" and content or nil
+
+  if warning then
+    ops.insert_annotation(db, event_id, nil, "warning", warning, os.time())
+  end
+
+  local sketch_id = ops.insert_object(db, hash, event_id, tier, "text", sketch_sketch, payload, size, os.time())
+
+  validate.edge(sketch_id, object_id, "sketch_of", event_id)
+  validate.relation("sketch_of")
+  ops.insert_edge(db, event_id, sketch_id, object_id, "sketch_of", os.time())
+
+  return sketch_id, hash
+end
+
+function mod.get_sketches(object_id)
+  return ops.query(db, [[
+    SELECT o.id, o.sketch, o.payload, o.created_at
+    FROM objects o
+    JOIN edges e ON e.from_id = o.id
+    WHERE e.to_id = ? AND e.relation = 'sketch_of'
+    ORDER BY o.created_at DESC;
+  ]], object_id)
+end
+
+function mod.gc_candidates(min_coldness)
+  min_coldness = min_coldness or 0.9
+  return ops.query(db, [[
+    SELECT o.id, o.hash, o.shape, o.sketch, o.coldness, o.size FROM objects o
+    WHERE o.coldness >= ?
+      AND o.id NOT IN (SELECT from_id FROM edges)
+      AND o.id NOT IN (SELECT to_id FROM edges)
+      AND o.id NOT IN (SELECT DISTINCT object_id FROM annotations WHERE object_id IS NOT NULL)
+    ORDER BY o.coldness DESC, o.created_at ASC;
+  ]], min_coldness)
+end
+
+function mod.gc_delete(id)
+  ops.delete_edges_for_object(db, id)
+  ops.delete_annotations_for_object(db, id)
+  ops.delete_object(db, id)
 end
 
 function mod.query(sql, ...)

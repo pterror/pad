@@ -152,6 +152,35 @@ test("validate: annotation rejects missing target", function()
   assert(not ok, "should reject missing target")
 end)
 
+test("validate: budget_objects rejects over limit", function()
+  local validate = require("pad.validate")
+  local ok = pcall(validate.budget_objects, 1000, { max_objects_per_event = 1000 })
+  assert(not ok, "should reject at limit")
+  assert(validate.budget_objects(999, { max_objects_per_event = 1000 }), "should accept under limit")
+end)
+
+test("validate: budget_edges rejects over limit", function()
+  local validate = require("pad.validate")
+  local ok = pcall(validate.budget_edges, 5000, { max_edges_per_event = 5000 })
+  assert(not ok, "should reject at limit")
+  assert(validate.budget_edges(4999, { max_edges_per_event = 5000 }), "should accept under limit")
+end)
+
+test("validate: relation accepts known types", function()
+  local validate = require("pad.validate")
+  assert(validate.relation("supersedes"), "supersedes")
+  assert(validate.relation("derived_from"), "derived_from")
+  assert(validate.relation("references"), "references")
+  assert(validate.relation("reply_to"), "reply_to")
+  assert(validate.relation("sketch_of"), "sketch_of")
+end)
+
+test("validate: relation rejects unknown types", function()
+  local validate = require("pad.validate")
+  local ok = pcall(validate.relation, "invented_relation")
+  assert(not ok, "should reject unknown relation")
+end)
+
 -- integration tests (require real sqlite)
 
 -- isolate test db
@@ -267,6 +296,58 @@ test("ingest: rejects missing source", function()
   local ok, err = pcall(pad.ingest, "no source", {})
   assert(not ok, "should reject missing source")
   assert(tostring(err):match("source"), "error should mention source")
+end)
+
+test("link: rejects unknown relation", function()
+  local id1, _ = pad.ingest("rel from " .. tostring(os.clock()), { source = "test" })
+  local id2, _ = pad.ingest("rel to " .. tostring(os.clock()), { source = "test" })
+  local event_id = pad.create_event({ source = "test" })
+  local ok = pcall(pad.link, id1, id2, "made_up", event_id)
+  assert(not ok, "should reject unknown relation type")
+end)
+
+test("gc: cold orphan without annotations is a candidate", function()
+  local id, _ = pad.ingest("gc test " .. tostring(os.clock()), { source = "test" })
+  -- force coldness to 1.0
+  pad.db:execute("UPDATE objects SET coldness = 1.0 WHERE id = ?;", id)
+  -- remove any annotations on this object
+  pad.db:execute("DELETE FROM annotations WHERE object_id = ?;", id)
+  local found = false
+  for cid in pad.gc_candidates(0.9) do
+    if cid == id then found = true end
+  end
+  assert(found, "cold orphan should be a GC candidate")
+end)
+
+test("create_sketch: creates linked sketch object", function()
+  local id, _ = pad.ingest("sketch target " .. tostring(os.clock()), { source = "test" })
+  local sketch_id, sketch_hash = pad.create_sketch(id, "this is a summary of the target object")
+  assert(sketch_id, "should return sketch object id")
+  assert(sketch_hash, "should return sketch hash")
+  -- verify edge exists
+  local found = false
+  for _, from_id, to_id, relation in pad.query("SELECT id, from_id, to_id, relation FROM edges WHERE from_id = ? AND to_id = ?;", sketch_id, id) do
+    if relation == "sketch_of" then found = true end
+  end
+  assert(found, "should have sketch_of edge")
+end)
+
+test("get_sketches: returns linked sketches", function()
+  local id, _ = pad.ingest("multi-sketch " .. tostring(os.clock()), { source = "test" })
+  pad.create_sketch(id, "summary v1 " .. tostring(os.clock()))
+  pad.create_sketch(id, "summary v2 " .. tostring(os.clock()))
+  local count = 0
+  for _ in pad.get_sketches(id) do count = count + 1 end
+  assert(count >= 2, "should have at least 2 linked sketches, got " .. count)
+end)
+
+test("gc: gc_delete removes object", function()
+  local id, _ = pad.ingest("gc delete " .. tostring(os.clock()), { source = "test" })
+  pad.db:execute("UPDATE objects SET coldness = 1.0 WHERE id = ?;", id)
+  pad.db:execute("DELETE FROM annotations WHERE object_id = ?;", id)
+  pad.gc_delete(id)
+  local obj = pad.get_object(id)
+  assert(not obj, "object should be deleted after gc_delete")
 end)
 
 -- cleanup

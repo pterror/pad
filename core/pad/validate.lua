@@ -48,4 +48,37 @@ function mod.annotation(opts)
   return true
 end
 
+function mod.budget_objects(count, budgets)
+  if count >= budgets.max_objects_per_event then
+    error("pad: budget exceeded: max_objects_per_event (" .. budgets.max_objects_per_event .. ")")
+  end
+  return true
+end
+
+function mod.budget_edges(count, budgets)
+  if count >= budgets.max_edges_per_event then
+    error("pad: budget exceeded: max_edges_per_event (" .. budgets.max_edges_per_event .. ")")
+  end
+  return true
+end
+
+-- known edge relation types
+mod.known_relations = {
+  supersedes = true,
+  derived_from = true,
+  references = true,
+  reply_to = true,
+  sketch_of = true,
+}
+
+function mod.relation(relation)
+  if not relation or type(relation) ~= "string" or #relation == 0 then
+    error("pad: relation must be a non-empty string")
+  end
+  if not mod.known_relations[relation] then
+    error("pad: unknown relation '" .. relation .. "' (known: supersedes, derived_from, references, reply_to, sketch_of)")
+  end
+  return true
+end
+
 return mod
