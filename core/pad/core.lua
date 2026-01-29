@@ -220,6 +220,25 @@ function mod.gc_delete(id)
   ops.delete_object(db, id)
 end
 
+function mod.add_watch(path)
+  validate.watch_path(path)
+  -- check for existing watch (UNIQUE constraint)
+  local iter = ops.query(db, "SELECT id FROM watches WHERE path = ?;", path)
+  if iter() then
+    error("pad: watch already exists for path: " .. path)
+  end
+  return ops.insert_watch(db, path, os.time())
+end
+
+function mod.remove_watch(path)
+  validate.watch_path(path)
+  ops.delete_watch(db, path)
+end
+
+function mod.list_watches()
+  return ops.fetch_watches(db)
+end
+
 function mod.query(sql, ...)
   return ops.query(db, sql, ...)
 end

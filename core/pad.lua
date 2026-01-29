@@ -25,6 +25,9 @@ usage:
   pad --git-log [n]          # capture recent git commits
   pad --git-diff [ref]       # capture git diff
   pad --git-status           # capture git status
+  pad --watch <path>         # add file watch
+  pad --unwatch <path>       # remove file watch
+  pad --watching             # list file watches
   pad --daemon               # start background daemon
   pad --daemon --foreground  # run daemon in foreground
   pad --daemon --stop        # stop daemon
@@ -428,6 +431,49 @@ local function do_git_status()
   io.stderr:write(string.format("pad: git status -> [%d] %s\n", id, hash))
 end
 
+local function do_watch(path)
+  if path == true then
+    io.stderr:write("usage: pad --watch <path>\n")
+    os.exit(1)
+  end
+  -- resolve to absolute path
+  if not path:match("^/") then
+    local cwd = require("dep.get_cwd").get_cwd()
+    path = cwd .. "/" .. path
+  end
+  local ok, err = pcall(pad.add_watch, path)
+  if not ok then
+    io.stderr:write("pad: " .. tostring(err) .. "\n")
+    os.exit(1)
+  end
+  io.stderr:write("pad: watching " .. path .. "\n")
+end
+
+local function do_unwatch(path)
+  if path == true then
+    io.stderr:write("usage: pad --unwatch <path>\n")
+    os.exit(1)
+  end
+  if not path:match("^/") then
+    local cwd = require("dep.get_cwd").get_cwd()
+    path = cwd .. "/" .. path
+  end
+  pad.remove_watch(path)
+  io.stderr:write("pad: unwatched " .. path .. "\n")
+end
+
+local function do_watching()
+  local count = 0
+  for id, path, created_at in pad.list_watches() do
+    local time = os.date("%Y-%m-%d %H:%M", created_at)
+    print(string.format("[%d] %s  %s", id, time, path))
+    count = count + 1
+  end
+  if count == 0 then
+    io.stderr:write("pad: no file watches\n")
+  end
+end
+
 local function do_daemon(flags)
   if flags.stop then
     daemon.stop()
@@ -481,6 +527,12 @@ local function main(args)
     do_git_diff(flags["git-diff"])
   elseif flags["git-status"] then
     do_git_status()
+  elseif flags.watch then
+    do_watch(flags.watch)
+  elseif flags.unwatch then
+    do_unwatch(flags.unwatch)
+  elseif flags.watching then
+    do_watching()
   elseif flags.daemon then
     do_daemon(flags)
   elseif #cmd_args > 0 then
@@ -547,6 +599,9 @@ local function main(args)
       ["git-log"] = function(n) do_git_log(n) end,
       ["git-diff"] = function(ref) do_git_diff(ref) end,
       ["git-status"] = function() do_git_status() end,
+      watch = do_watch,
+      unwatch = do_unwatch,
+      watching = function() do_watching() end,
     }
     io.stderr:write("pad: interactive mode (type text for notes, /command for operations, ctrl+d to exit)\n")
     while true do
@@ -561,7 +616,7 @@ local function main(args)
         if cmd == "quit" or cmd == "exit" or cmd == "q" then
           break
         elseif cmd == "help" then
-          print("commands: /search /show /recent /history /sources /note /tag /untag /tagged /recall /stats /orphans /vacuum /gc /urgent /clip /git-log /git-diff /git-status /quit")
+          print("commands: /search /show /recent /history /sources /note /tag /untag /tagged /recall /stats /orphans /vacuum /gc /urgent /clip /git-log /git-diff /git-status /watch /unwatch /watching /quit")
           print("anything else is captured as a note")
         elseif repl_commands[cmd] then
           local arg = #rest > 0 and rest or nil

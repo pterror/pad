@@ -2,10 +2,10 @@
 
 ## What Works
 
-Everything below is implemented and tested (46 tests passing):
+Everything below is implemented and tested (58 tests passing):
 
 - **Primitives architecture**: ops.lua / validate.lua / core.lua
-- **CLI flags**: --search, --show, --recent, --history, --sources, --note, --tag, --untag, --tagged, --recall, --orphans, --stats, --vacuum, --gc, --urgent, --clip, --git-log, --git-diff, --git-status, --daemon
+- **CLI flags**: --search, --show, --recent, --history, --sources, --note, --tag, --untag, --tagged, --recall, --orphans, --stats, --vacuum, --gc, --urgent, --clip, --git-log, --git-diff, --git-status, --watch, --unwatch, --watching, --daemon
 - **Interactive REPL**: TTY + no args starts REPL with /command dispatch, bare text captured as notes
 - **Shell wrapper**: `pad <cmd>` captures output with `source = "command"`
 - **Command unwrapping**: nix run/shell/develop, sudo, time, strace, ltrace, env, nice, timeout, watch
@@ -20,57 +20,17 @@ Everything below is implemented and tested (46 tests passing):
 - **Clipboard extension**: `--clip` captures clipboard (auto-detects wl-paste, xclip, xsel, pbpaste)
 - **Git extension**: `--git-log [n]`, `--git-diff [ref]`, `--git-status` capture git output with source = "git:*"
 - **Shell integration**: pad.bash with aliases and zsh preexec hook
-- **Daemon mode**: `--daemon` (fork/setsid/PID file), `--daemon --foreground`, `--daemon --stop`, `--daemon --status`. Epoll-based event loop with timerfd for clipboard watch (2s) and vacuum (1h). Vendored deps: epoll, inotify, ljsocket, http server, websocket (from ~/git/lua/)
-
-## Next: Daemon Extensions
-
-Daemon core is implemented (epoll loop, timerfd, clipboard watch, vacuum, fork/PID). Remaining daemon tasks to add to the epoll set:
-
-1. **inotify file watch** - Add inotify fd to epoll using vendored `dep/inotify.lua`. Wire `--watch`/`--unwatch`/`--watching` CLI flags. Store watch registrations in the database.
-
-2. **Unix socket** - `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands: `{"action": "ingest", "content": "...", "source": "..."}`. Use vendored `dep/ljsocket.lua`. Accept fd goes in epoll, each client connection added as a new fd.
-
-3. **WebSocket listener** - HTTP server on localhost using vendored `dep/http/server.lua` + `dep/websocket.lua` on the daemon's epoll instance. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
-
-## Next: File Watcher Extension
-
-Depends on daemon mode for continuous watching.
-
-Prior art at `~/git/lua/dep/inotify.lua`: inotify wrapper that takes an `epoll` instance in its constructor and adds the inotify fd directly to the epoll set. Handles event parsing (variable-length `inotify_event` structs), per-watch callbacks, and watch removal. Full event mask enum included.
-
-```lua
-local inotify = require("dep.inotify")
-local watcher = inotify.new(epoll)
-local wd, remove = watcher:add("/path/to/file", inotify.event_mask.IN_MODIFY, function(event)
-  -- ingest changed file
-end)
-```
-
-This is the primary approach. For non-Linux platforms, fall back to timerfd + stat polling.
-
-### CLI Integration
-
-```
-pad --watch /path/to/file     # register a path for watching (stored in annotations or a config table)
-pad --unwatch /path/to/file   # stop watching
-pad --watching                # list watched paths
-```
-
-Watch registrations stored as annotations on a sentinel object or in a simple config table in the database.
+- **Daemon mode**: `--daemon` (fork/setsid/PID file), `--daemon --foreground`, `--daemon --stop`, `--daemon --status`. Epoll-based event loop with timerfd for clipboard watch (2s) and vacuum (1h)
+- **Inotify file watch**: `--watch <path>`, `--unwatch <path>`, `--watching`. Watches stored in `watches` table. Daemon registers IN_MODIFY|IN_CLOSE_WRITE callbacks that ingest file content with `source = "watch"`
+- **Unix socket IPC**: `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands via shared dispatch module. Actions: ingest, search, recent, show, stats, note, tag, untag
+- **HTTP/WebSocket listener**: Port 7778. HTTP serves JSON stats on `/` and `/status`. WebSocket upgrade uses same dispatch protocol as unix socket. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
+- **Dispatch module**: `pad/dispatch.lua` — shared JSON action routing used by both unix socket and WebSocket, with pcall error handling
 
 ## Next: Web UI Extension (`pad --web`)
 
 Local web UI served from extensions/web/. This is an extension, not core.
 
-### HTTP Server
-
-Prior art at `~/git/lua/lib/http/` — full HTTP/1.1 stack already built on the same epoll + ljsocket foundation:
-
-- `lib/http/format.lua` — request/response parse and serialize (handles methods, headers, query params, URL decoding)
-- `lib/http/server.lua` — HTTP server wrapping `lib/socket/server.lua`, takes an optional `epoll` instance
-- `lib/websocket.lua` — WebSocket upgrade handler, integrates via `epoll:modify`
-
-Vendor these into `dep/` alongside epoll.lua and ljsocket. The HTTP server shares the daemon's epoll instance — `--web` just adds a listener fd to the same loop. WebSocket support comes for free, enabling live-push to browser/extension clients.
+The HTTP server and WebSocket are already running on port 7778 as part of the daemon. The web UI would add:
 
 ### API Endpoints
 
@@ -99,12 +59,10 @@ The frontend should be a single HTML file with embedded CSS/JS for simplicity. N
 
 ### Implementation Plan
 
-1. HTTP server + WebSocket already vendored in `dep/` from daemon mode setup
-2. Create `extensions/web/init.lua` — route handler calling `pad.core`, starts HTTP server on the daemon's epoll
-3. Create `extensions/web/router.lua` mapping routes to handler functions
-4. Create `extensions/web/static/index.html` with the frontend
-5. Handlers call into `pad.core` for data (same API the CLI uses)
-5. Wire `--web [port]` flag in pad.lua (default port 7778)
+1. Extend daemon's HTTP handler with path-based routing for `/api/*` endpoints
+2. Create `extensions/web/init.lua` — route handler calling `pad.core`
+3. Create `extensions/web/static/index.html` with the frontend
+4. Handlers call into `pad.core` for data (same API the CLI uses)
 
 ## Low Priority / Future
 
@@ -118,3 +76,4 @@ The frontend should be a single HTML file with embedded CSS/JS for simplicity. N
 - REPL readline/linenoise support for history and editing
 - Exit code tracking for shell wrapper commands (for --urgent)
 - Events during unusual hours detection (for --urgent)
+- Non-Linux fallback for inotify (timerfd + stat polling)

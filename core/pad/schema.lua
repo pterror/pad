@@ -62,6 +62,13 @@ mod.init_sql = [[
     CHECK (event_id IS NOT NULL OR object_id IS NOT NULL)
   );
 
+  -- watches: inotify file watches
+  CREATE TABLE IF NOT EXISTS watches (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+  );
+
   -- indexes for common queries
   CREATE INDEX IF NOT EXISTS idx_objects_hash ON objects(hash);
   CREATE INDEX IF NOT EXISTS idx_objects_event ON objects(event_id);

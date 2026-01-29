@@ -71,6 +71,16 @@ mod.known_relations = {
   sketch_of = true,
 }
 
+function mod.watch_path(path)
+  if not path then
+    error("pad: watch path is required")
+  end
+  if type(path) ~= "string" or #path == 0 then
+    error("pad: watch path must be a non-empty string, got: " .. tostring(path))
+  end
+  return true
+end
+
 function mod.relation(relation)
   if not relation or type(relation) ~= "string" or #relation == 0 then
     error("pad: relation must be a non-empty string")

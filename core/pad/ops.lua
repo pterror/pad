@@ -114,6 +114,22 @@ function mod.count_edges_for_event(db, event_id)
   return iter()
 end
 
+function mod.insert_watch(db, path, created_at)
+  db:execute(
+    "INSERT INTO watches (path, created_at) VALUES (?, ?);",
+    path, created_at
+  )
+  return db:last_insert_rowid()
+end
+
+function mod.delete_watch(db, path)
+  db:execute("DELETE FROM watches WHERE path = ?;", path)
+end
+
+function mod.fetch_watches(db)
+  return db:query("SELECT id, path, created_at FROM watches ORDER BY created_at;")
+end
+
 function mod.query(db, sql, ...)
   return db:query(sql, ...)
 end

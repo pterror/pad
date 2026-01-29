@@ -4,11 +4,18 @@ pad daemon - background event loop
 Runs an epoll-based loop with:
   - clipboard timerfd (every 2s)
   - vacuum timerfd (every 1h)
-  - (future) inotify file watch, unix socket, websocket listener
+  - inotify file watch
+  - unix socket IPC
+  - HTTP/WebSocket listener
 ]]
 
 local ffi = require("ffi")
 local epoll = require("dep.epoll")
+local inotify = require("dep.inotify")
+local socket_server = require("dep.socket.server")
+local http_format = require("dep.http.format")
+local websocket = require("dep.websocket")
+local dispatch = require("pad.dispatch")
 
 ffi.cdef[[
   int fork(void);
@@ -124,6 +131,119 @@ local function log(msg)
   io.stderr:flush()
 end
 
+-- inotify file watch
+
+local function setup_inotify(ep, pad)
+  local watcher = inotify.new(ep)
+  local handles = {}
+  for id, path, _ in pad.list_watches() do
+    local f = io.open(path, "r")
+    if f then
+      f:close()
+      local wd = watcher:add(path, bit.bor(inotify.event_mask.IN_MODIFY, inotify.event_mask.IN_CLOSE_WRITE), function()
+        local fh = io.open(path, "r")
+        if not fh then return end
+        local content = fh:read("*a")
+        fh:close()
+        if content and #content > 0 then
+          local obj_id, hash = pad.ingest(content, { source = "watch", metadata = { path = path } })
+          log("watch " .. path .. " -> [" .. obj_id .. "] " .. hash)
+        end
+      end)
+      handles[id] = wd
+      log("watching: " .. path)
+    else
+      log("watch: skipping " .. path .. " (file not found)")
+    end
+  end
+  return watcher, handles
+end
+
+-- unix socket IPC
+
+local function setup_socket(ep, pad)
+  local sock_path = pad_dir() .. "/pad.sock"
+  os.remove(sock_path)
+  local server = socket_server.server(function(client, state)
+    state = state or ""
+    local data = client:receive()
+    if not data or #data == 0 then
+      client:close()
+      return state
+    end
+    state = state .. data
+    while true do
+      local nl = state:find("\n")
+      if not nl then break end
+      local line = state:sub(1, nl - 1)
+      state = state:sub(nl + 1)
+      local response = dispatch.handle_line(pad, line)
+      client:send(response .. "\n")
+    end
+    return state
+  end, sock_path, ep, "unix")
+  log("unix socket listening: " .. sock_path)
+  return server
+end
+
+-- HTTP/WebSocket listener
+
+local function setup_http(ep, pad, port)
+  port = port or 7778
+  local json = require("dep.lunajson")
+  local server = socket_server.server(function(client, state)
+    if state then return state end -- already handled (upgraded to ws)
+    local data = client:receive()
+    if not data or #data == 0 then
+      client:close()
+      return nil
+    end
+    local req, err = http_format.string_to_http_request(data)
+    if not req then
+      client:send("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request")
+      client:close()
+      return nil
+    end
+    -- check for websocket upgrade
+    if (req.headers["upgrade"] or {})[1] == "websocket" then
+      local send, close = websocket.websocket(client, req, function(sock, msg)
+        if msg.type == "text" then
+          local response = dispatch.handle_line(pad, msg.payload)
+          send({ type = "text", payload = response })
+        elseif msg.type == "close" then
+          if close then close() end
+        elseif msg.type == "ping" then
+          send({ type = "pong", payload = msg.payload })
+        end
+      end, function()
+        log("websocket client disconnected")
+      end, ep)
+      if send then
+        log("websocket client connected")
+        return true -- mark as upgraded
+      end
+    end
+    -- regular HTTP
+    local body
+    if req.path == "/status" or req.path == "/" then
+      local result = dispatch.dispatch(pad, { action = "stats" })
+      body = json.encode(result)
+    else
+      body = json.encode({ ok = false, error = "not found" })
+    end
+    local response = http_format.http_response_to_string({
+      status = 200,
+      headers = { ["content-type"] = "application/json" },
+      body = body,
+    })
+    client:send(response)
+    client:close()
+    return nil
+  end, port, ep)
+  log("http/ws listening on port " .. port)
+  return server
+end
+
 -- main loop
 
 function mod.run(pad, clipboard, foreground)
@@ -174,6 +294,24 @@ function mod.run(pad, clipboard, foreground)
   end)
   log("vacuum timer enabled (1h interval)")
 
+  -- inotify file watch
+  local ok_ino, watcher, watch_handles = pcall(setup_inotify, ep, pad)
+  if not ok_ino then
+    log("inotify disabled: " .. tostring(watcher))
+  end
+
+  -- unix socket IPC
+  local ok_sock, sock_server = pcall(setup_socket, ep, pad)
+  if not ok_sock then
+    log("unix socket disabled: " .. tostring(sock_server))
+  end
+
+  -- HTTP/WebSocket listener
+  local ok_http, http_server = pcall(setup_http, ep, pad, 7778)
+  if not ok_http then
+    log("http/ws disabled: " .. tostring(http_server))
+  end
+
   -- run
   log("entering event loop")
   ep:loop()
@@ -193,6 +331,7 @@ function mod.stop()
     return false
   end
   ffi.C.kill(pid, 15) -- SIGTERM
+  os.remove(pad_dir() .. "/pad.sock")
   mod.clear_pid()
   io.stderr:write("pad: daemon stopped (pid " .. pid .. ")\n")
   return true

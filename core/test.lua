@@ -79,6 +79,12 @@ test("schema: SQL parses", function()
   assert_match(schema.init_sql, "idx_objects_coldness", "should have coldness index")
 end)
 
+test("schema: watches table exists in init_sql", function()
+  local schema = require("pad.schema")
+  assert_match(schema.init_sql, "CREATE TABLE IF NOT EXISTS watches", "should have watches table")
+  assert_match(schema.init_sql, "path TEXT NOT NULL UNIQUE", "watches should have unique path")
+end)
+
 -- validator tests (pure, no db)
 
 test("validate: rejects nil source", function()
@@ -164,6 +170,25 @@ test("validate: budget_edges rejects over limit", function()
   local ok = pcall(validate.budget_edges, 5000, { max_edges_per_event = 5000 })
   assert(not ok, "should reject at limit")
   assert(validate.budget_edges(4999, { max_edges_per_event = 5000 }), "should accept under limit")
+end)
+
+test("validate: watch_path rejects nil", function()
+  local validate = require("pad.validate")
+  local ok, err = pcall(validate.watch_path, nil)
+  assert(not ok, "should reject nil path")
+  assert(tostring(err):match("watch path"), "error should mention watch path")
+end)
+
+test("validate: watch_path rejects empty string", function()
+  local validate = require("pad.validate")
+  local ok = pcall(validate.watch_path, "")
+  assert(not ok, "should reject empty path")
+end)
+
+test("validate: watch_path accepts valid path", function()
+  local validate = require("pad.validate")
+  assert(validate.watch_path("/tmp/test.txt"), "should accept valid path")
+  assert(validate.watch_path("relative/path"), "should accept relative path")
 end)
 
 test("validate: relation accepts known types", function()
@@ -381,6 +406,104 @@ test("daemon: is_running false for stale PID", function()
   f:close()
   assert(not daemon.is_running(), "should not be running for stale PID")
   daemon.clear_pid()
+end)
+
+-- watch ops tests
+
+test("watch: add and list", function()
+  local watch_path = "/tmp/pad_test_watch_" .. os.time()
+  pad.add_watch(watch_path)
+  local found = false
+  for id, path, created_at in pad.list_watches() do
+    if path == watch_path then found = true end
+  end
+  assert(found, "should find added watch in list")
+  pad.remove_watch(watch_path)
+end)
+
+test("watch: remove", function()
+  local watch_path = "/tmp/pad_test_watch_rm_" .. os.time()
+  pad.add_watch(watch_path)
+  pad.remove_watch(watch_path)
+  local found = false
+  for id, path, created_at in pad.list_watches() do
+    if path == watch_path then found = true end
+  end
+  assert(not found, "removed watch should not appear in list")
+end)
+
+test("watch: duplicate rejection", function()
+  local watch_path = "/tmp/pad_test_watch_dup_" .. os.time()
+  pad.add_watch(watch_path)
+  local ok = pcall(pad.add_watch, watch_path)
+  assert(not ok, "should reject duplicate watch path")
+  pad.remove_watch(watch_path)
+end)
+
+-- dispatch tests
+
+local dispatch = require("pad.dispatch")
+
+test("dispatch: ingest action", function()
+  local result = dispatch.dispatch(pad, { action = "ingest", content = "dispatch test " .. os.clock(), source = "test" })
+  assert(result.ok, "ingest should succeed")
+  assert(result.id, "should return id")
+  assert(result.hash, "should return hash")
+end)
+
+test("dispatch: search action", function()
+  pad.ingest("dispatch search target", { source = "test" })
+  local result = dispatch.dispatch(pad, { action = "search", term = "dispatch search" })
+  assert(result.ok, "search should succeed")
+  assert(#result.results > 0, "should find results")
+end)
+
+test("dispatch: stats action", function()
+  local result = dispatch.dispatch(pad, { action = "stats" })
+  assert(result.ok, "stats should succeed")
+  assert(result.objects, "should have objects count")
+  assert(result.events, "should have events count")
+end)
+
+test("dispatch: show action", function()
+  local id, _ = pad.ingest("dispatch show test " .. os.clock(), { source = "test" })
+  local result = dispatch.dispatch(pad, { action = "show", id = tostring(id) })
+  assert(result.ok, "show should succeed")
+  assert(result.object, "should return object")
+  assert_eq(result.object.id, id, "object id should match")
+end)
+
+test("dispatch: note action", function()
+  local result = dispatch.dispatch(pad, { action = "note", text = "dispatch note " .. os.clock() })
+  assert(result.ok, "note should succeed")
+  assert(result.id, "should return id")
+end)
+
+test("dispatch: unknown action", function()
+  local result = dispatch.dispatch(pad, { action = "nonexistent" })
+  assert(not result.ok, "unknown action should fail")
+  assert(result.error:match("unknown"), "error should mention unknown")
+end)
+
+test("dispatch: invalid action table", function()
+  local result = dispatch.dispatch(pad, { })
+  assert(not result.ok, "missing action field should fail")
+end)
+
+test("dispatch: handle_line parses JSON and dispatches", function()
+  local json = require("dep.lunajson")
+  local response = dispatch.handle_line(pad, '{"action":"stats"}')
+  local result = json.decode(response)
+  assert(result.ok, "handle_line should return ok result")
+  assert(result.objects, "should have objects in stats")
+end)
+
+test("dispatch: handle_line rejects invalid JSON", function()
+  local json = require("dep.lunajson")
+  local response = dispatch.handle_line(pad, "not json at all")
+  local result = json.decode(response)
+  assert(not result.ok, "invalid JSON should fail")
+  assert(result.error:match("JSON"), "error should mention JSON")
 end)
 
 test("daemon: timerfd creation", function()
