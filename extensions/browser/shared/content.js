@@ -168,6 +168,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
 
     sendResponse({ blocks: blocks });
+  } else if (request.action === 'getTables') {
+    const tables = [];
+
+    document.querySelectorAll('table').forEach(table => {
+      const rows = [];
+
+      // Get headers
+      const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+      if (headerRow) {
+        const headers = Array.from(headerRow.querySelectorAll('th, td'))
+          .map(cell => cell.textContent.trim());
+        if (headers.length > 0) {
+          rows.push(headers.join('\t'));
+        }
+      }
+
+      // Get body rows
+      const bodyRows = table.querySelectorAll('tbody tr') ||
+                       table.querySelectorAll('tr:not(:first-child)');
+      bodyRows.forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('td, th'))
+          .map(cell => cell.textContent.trim());
+        if (cells.length > 0 && cells.some(c => c.length > 0)) {
+          rows.push(cells.join('\t'));
+        }
+      });
+
+      if (rows.length > 1) { // At least header + 1 row
+        tables.push(rows.join('\n'));
+      }
+    });
+
+    sendResponse({ tables: tables });
   }
   return true;
 });

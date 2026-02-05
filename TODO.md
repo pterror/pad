@@ -42,7 +42,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - ~~Capture all links on page (batch)~~ DONE
 - Capture visible screenshot
 - ~~Capture code blocks from pages (detect `<pre>`, `<code>`)~~ DONE
-- Capture tables as structured data
+- ~~Capture tables as structured data~~ DONE (TSV format)
 
 ### Other
 

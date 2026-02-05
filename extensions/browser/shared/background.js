@@ -84,6 +84,12 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Capture code blocks to pad',
     contexts: ['page']
   });
+
+  chrome.contextMenus.create({
+    id: 'pad-tables',
+    title: 'Capture tables to pad',
+    contexts: ['page']
+  });
 });
 
 // Connect to pad daemon via WebSocket
@@ -224,6 +230,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             `--- Block ${i + 1}${b.lang ? ` (${b.lang})` : ''} ---\n${b.code}`
           ).join('\n\n');
           capture(content, 'code', { url: pageUrl, title: pageTitle, count: response.blocks.length });
+        }
+      });
+      break;
+
+    case 'pad-tables':
+      // Request tables from content script
+      chrome.tabs.sendMessage(tab.id, { action: 'getTables' }, (response) => {
+        if (response && response.tables && response.tables.length > 0) {
+          const content = response.tables.map((t, i) =>
+            `--- Table ${i + 1} ---\n${t}`
+          ).join('\n\n');
+          capture(content, 'table', { url: pageUrl, title: pageTitle, count: response.tables.length });
         }
       });
       break;
