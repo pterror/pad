@@ -1,7 +1,20 @@
 // pad capture - background service worker
-// Handles context menus and WebSocket connection to pad daemon
+// Handles context menus, keyboard shortcuts, and WebSocket connection to pad daemon
 
 const PAD_WS_URL = 'ws://localhost:7778';
+
+// Cross-browser badge API (MV3: action, MV2: browserAction)
+const badgeAPI = chrome.action || chrome.browserAction;
+
+// Show badge notification
+function showBadge(text, color) {
+  if (!badgeAPI) return;
+  badgeAPI.setBadgeText({ text: text });
+  badgeAPI.setBadgeBackgroundColor({ color: color });
+  setTimeout(() => {
+    badgeAPI.setBadgeText({ text: '' });
+  }, 2000);
+}
 
 let ws = null;
 let wsConnecting = false;
@@ -76,8 +89,10 @@ function connectWebSocket() {
         const response = JSON.parse(event.data);
         if (response.error) {
           console.error('pad: daemon error:', response.error);
+          showBadge('!', '#dc3545');
         } else {
           console.log('pad: captured', response);
+          showBadge('✓', '#28a745');
         }
       } catch (e) {
         console.log('pad: response:', event.data);
@@ -156,4 +171,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   return true;
+});
+
+// Handle keyboard shortcuts
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'capture-page' && tab) {
+    capture(tab.url, 'url', { title: tab.title });
+  } else if (command === 'capture-selection' && tab) {
+    // Request selection from content script
+    chrome.tabs.sendMessage(tab.id, { action: 'getSelection' }, (response) => {
+      if (response && response.selection) {
+        capture(response.selection, 'selection', { url: tab.url, title: tab.title });
+      }
+    });
+  }
 });

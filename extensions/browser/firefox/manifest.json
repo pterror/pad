@@ -11,6 +11,25 @@
     "matches": ["<all_urls>"],
     "js": ["content.js"]
   }],
+  "browser_action": {
+    "default_title": "pad capture"
+  },
+  "commands": {
+    "capture-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "Capture page URL to pad"
+    },
+    "capture-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Capture selection to pad"
+    }
+  },
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",

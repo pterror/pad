@@ -9,6 +9,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       title: document.title,
       selection: window.getSelection().toString()
     });
+  } else if (request.action === 'getSelection') {
+    sendResponse({
+      selection: window.getSelection().toString()
+    });
   }
   return true;
 });
