@@ -32,6 +32,8 @@ usage:
   pad --daemon --foreground  # run daemon in foreground
   pad --daemon --stop        # stop daemon
   pad --daemon --status      # check daemon status
+  pad --dump [file]          # export all data to JSON
+  pad --load <file>          # import data from dump
 ]]
 
 package.path = package.path .. ";./?.lua;./?/init.lua"
@@ -46,6 +48,7 @@ local ok_clip, clipboard = pcall(require, "clipboard")
 if not ok_clip then clipboard = nil end
 local ok_git, git_ext = pcall(require, "git")
 if not ok_git then git_ext = nil end
+local json = require("dep.lunajson")
 
 local function is_tty()
   local _, code = os.execute("test -t 0")
@@ -482,6 +485,163 @@ local function do_daemon(flags)
   end
 end
 
+local function do_dump(file)
+  local data = {
+    version = 1,
+    exported_at = os.time(),
+    events = {},
+    objects = {},
+    edges = {},
+    annotations = {},
+    watches = {},
+  }
+
+  -- Export events
+  for id, created_at, cwd, command, source in pad.query(
+    "SELECT id, created_at, cwd, command, source FROM events ORDER BY id;"
+  ) do
+    data.events[#data.events + 1] = {
+      id = id, created_at = created_at, cwd = cwd, command = command, source = source
+    }
+  end
+
+  -- Export objects
+  for id, hash, event_id, tier, shape, sketch, payload, size, coldness, last_accessed_at, access_count, created_at in pad.query(
+    "SELECT id, hash, event_id, tier, shape, sketch, payload, size, coldness, last_accessed_at, access_count, created_at FROM objects ORDER BY id;"
+  ) do
+    data.objects[#data.objects + 1] = {
+      id = id, hash = hash, event_id = event_id, tier = tier, shape = shape,
+      sketch = sketch, payload = payload, size = size, coldness = coldness,
+      last_accessed_at = last_accessed_at, access_count = access_count, created_at = created_at
+    }
+  end
+
+  -- Export edges
+  for id, event_id, from_id, to_id, relation, created_at in pad.query(
+    "SELECT id, event_id, from_id, to_id, relation, created_at FROM edges ORDER BY id;"
+  ) do
+    data.edges[#data.edges + 1] = {
+      id = id, event_id = event_id, from_id = from_id, to_id = to_id,
+      relation = relation, created_at = created_at
+    }
+  end
+
+  -- Export annotations
+  for id, event_id, object_id, key, value, created_at in pad.query(
+    "SELECT id, event_id, object_id, key, value, created_at FROM annotations ORDER BY id;"
+  ) do
+    data.annotations[#data.annotations + 1] = {
+      id = id, event_id = event_id, object_id = object_id,
+      key = key, value = value, created_at = created_at
+    }
+  end
+
+  -- Export watches
+  for id, path, created_at in pad.query(
+    "SELECT id, path, created_at FROM watches ORDER BY id;"
+  ) do
+    data.watches[#data.watches + 1] = {
+      id = id, path = path, created_at = created_at
+    }
+  end
+
+  local output = json.encode(data)
+
+  if file and file ~= true then
+    local f = io.open(file, "w")
+    if not f then
+      io.stderr:write("pad: cannot open file: " .. file .. "\n")
+      os.exit(1)
+    end
+    f:write(output)
+    f:close()
+    print(string.format("pad: exported %d events, %d objects, %d edges, %d annotations to %s",
+      #data.events, #data.objects, #data.edges, #data.annotations, file))
+  else
+    print(output)
+  end
+end
+
+local function do_load(file)
+  if not file or file == true then
+    io.stderr:write("pad: --load requires a file path\n")
+    os.exit(1)
+  end
+
+  local f = io.open(file, "r")
+  if not f then
+    io.stderr:write("pad: cannot open file: " .. file .. "\n")
+    os.exit(1)
+  end
+  local content = f:read("*a")
+  f:close()
+
+  local ok, data = pcall(json.decode, content)
+  if not ok then
+    io.stderr:write("pad: invalid JSON in file\n")
+    os.exit(1)
+  end
+
+  if not data.version then
+    io.stderr:write("pad: missing version in dump file\n")
+    os.exit(1)
+  end
+
+  local db = pad.db
+  local imported = { events = 0, objects = 0, edges = 0, annotations = 0, watches = 0 }
+
+  -- Import events
+  for _, e in ipairs(data.events or {}) do
+    db:execute(
+      "INSERT OR IGNORE INTO events (id, created_at, cwd, command, source) VALUES (?, ?, ?, ?, ?);",
+      e.id, e.created_at, e.cwd, e.command, e.source
+    )
+    imported.events = imported.events + 1
+  end
+
+  -- Import objects (skip FTS, rebuild at end)
+  for _, o in ipairs(data.objects or {}) do
+    db:execute([[
+      INSERT OR IGNORE INTO objects (id, hash, event_id, tier, shape, sketch, payload, size, coldness, last_accessed_at, access_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    ]], o.id, o.hash, o.event_id, o.tier, o.shape, o.sketch, o.payload, o.size, o.coldness, o.last_accessed_at, o.access_count, o.created_at)
+    imported.objects = imported.objects + 1
+  end
+
+  -- Import edges
+  for _, e in ipairs(data.edges or {}) do
+    db:execute(
+      "INSERT OR IGNORE INTO edges (id, event_id, from_id, to_id, relation, created_at) VALUES (?, ?, ?, ?, ?, ?);",
+      e.id, e.event_id, e.from_id, e.to_id, e.relation, e.created_at
+    )
+    imported.edges = imported.edges + 1
+  end
+
+  -- Import annotations
+  for _, a in ipairs(data.annotations or {}) do
+    db:execute(
+      "INSERT OR IGNORE INTO annotations (id, event_id, object_id, key, value, created_at) VALUES (?, ?, ?, ?, ?, ?);",
+      a.id, a.event_id, a.object_id, a.key, a.value, a.created_at
+    )
+    imported.annotations = imported.annotations + 1
+  end
+
+  -- Import watches
+  for _, w in ipairs(data.watches or {}) do
+    db:execute(
+      "INSERT OR IGNORE INTO watches (id, path, created_at) VALUES (?, ?, ?);",
+      w.id, w.path, w.created_at
+    )
+    imported.watches = imported.watches + 1
+  end
+
+  -- Rebuild FTS index
+  pad.rebuild_fts()
+
+  print(string.format("pad: imported %d events, %d objects, %d edges, %d annotations from %s",
+    imported.events, imported.objects, imported.edges, imported.annotations, file))
+end
+
 -- main
 
 local function main(args)
@@ -533,6 +693,10 @@ local function main(args)
     do_watching()
   elseif flags.daemon then
     do_daemon(flags)
+  elseif flags.dump then
+    do_dump(flags.dump)
+  elseif flags.load then
+    do_load(flags.load)
   elseif #cmd_args > 0 then
     -- shell wrapper: run command, capture output, log event
     local full_cmd = table.concat(cmd_args, " ")

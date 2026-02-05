@@ -28,6 +28,7 @@ Everything below is implemented and tested (91 tests passing):
 - **Web UI extension**: `extensions/web/` — local web UI on daemon port 7778. Table router with chain composition, JSON API endpoints, single-file HTML frontend (dark terminal theme, vanilla JS, no build step). See `docs/api.md` for endpoint reference
 - **FTS5 full-text search**: `--search` uses SQLite FTS5 with BM25 ranking. Supports phrases ("hello world"), boolean (test AND another), and prefix (hel*) queries. Auto-migrates existing databases
 - **Browser extension**: `extensions/browser/` — Chrome (MV3) and Firefox (MV2) context menu capture via WebSocket
+- **Export/import**: `--dump [file]` exports all data to JSON, `--load <file>` imports from dump (rebuilds FTS index)
 
 ## Next Up
 
@@ -52,7 +53,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - Email extension (mbox, notmuch)
 - RSS/Atom feed extension
 - Screenshot OCR extension
-- Export/import (pad dump, pad load)
+- ~~Export/import (pad dump, pad load)~~ DONE
 - ~~Full-text search index (SQLite FTS5)~~ DONE - auto-migrates existing DBs
 - Compression for cold objects (zstd via FFI)
 - REPL readline/linenoise support for history and editing
