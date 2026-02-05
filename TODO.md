@@ -19,7 +19,7 @@ Everything below is implemented and tested (91 tests passing):
 - **Time awareness**: `--urgent` surfaces unreviewed objects (access_count <= 1) and objects tagged todo/urgent/deadline
 - **Clipboard extension**: `--clip` captures clipboard (auto-detects wl-paste, xclip, xsel, pbpaste)
 - **Git extension**: `--git-log [n]`, `--git-diff [ref]`, `--git-status` capture git output with source = "git:*"
-- **Shell integration**: pad.bash with aliases and zsh preexec hook
+- **Shell integration**: pad.bash (bash/zsh) and pad.fish (fish) with aliases, completions, and preexec hooks
 - **Daemon mode**: `--daemon` (fork/setsid/PID file), `--daemon --foreground`, `--daemon --stop`, `--daemon --status`. Epoll-based event loop with timerfd for clipboard watch (2s) and vacuum (1h)
 - **Inotify file watch**: `--watch <path>`, `--unwatch <path>`, `--watching`. Watches stored in `watches` table. Daemon registers IN_MODIFY|IN_CLOSE_WRITE callbacks that ingest file content with `source = "watch"`
 - **Unix socket IPC**: `$PAD_DIR/pad.sock` accepting newline-delimited JSON commands via shared dispatch module. Actions: ingest, search, recent, show, stats, note, tag, untag
@@ -48,7 +48,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 
 ## Low Priority / Future
 
-- Fish shell integration
+- ~~Fish shell integration~~ DONE
 - Email extension (mbox, notmuch)
 - RSS/Atom feed extension
 - Screenshot OCR extension
