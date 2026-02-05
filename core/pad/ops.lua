@@ -21,7 +21,13 @@ function mod.insert_object(db, hash, event_id, tier, shape, sketch, payload, siz
     "INSERT INTO objects (hash, event_id, tier, shape, sketch, payload, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
     hash, event_id, tier, shape, sketch, payload, size, created_at
   )
-  return db:last_insert_rowid()
+  local id = db:last_insert_rowid()
+  -- Sync to FTS index
+  db:execute(
+    "INSERT INTO objects_fts (rowid, sketch) VALUES (?, ?);",
+    id, sketch or ""
+  )
+  return id
 end
 
 function mod.insert_edge(db, event_id, from_id, to_id, relation, created_at)
@@ -93,6 +99,8 @@ function mod.age_cool_all(db, now, rate)
 end
 
 function mod.delete_object(db, id)
+  -- Remove from FTS index
+  db:execute("DELETE FROM objects_fts WHERE rowid = ?;", id)
   db:execute("DELETE FROM objects WHERE id = ?;", id)
 end
 
@@ -132,6 +140,33 @@ end
 
 function mod.query(db, sql, ...)
   return db:query(sql, ...)
+end
+
+function mod.search_fts(db, term, limit)
+  limit = limit or 20
+  return db:query([[
+    SELECT o.id, o.shape, o.sketch, bm25(objects_fts) as rank
+    FROM objects_fts fts
+    JOIN objects o ON o.id = fts.rowid
+    WHERE objects_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?;
+  ]], term, limit)
+end
+
+function mod.rebuild_fts(db)
+  -- Clear existing FTS entries
+  db:execute("DELETE FROM objects_fts;")
+  -- Rebuild from all objects
+  db:execute([[
+    INSERT INTO objects_fts (rowid, sketch)
+    SELECT id, COALESCE(sketch, '') FROM objects;
+  ]])
+end
+
+function mod.fts_count(db)
+  local iter = db:query("SELECT COUNT(*) FROM objects_fts;")
+  return iter()
 end
 
 return mod

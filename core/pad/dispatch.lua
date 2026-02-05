@@ -31,14 +31,8 @@ function mod.dispatch(pad, action)
     if not action.term then
       return { ok = false, error = "search requires term" }
     end
-    local now = os.time()
     local results = {}
-    for id, shape, sketch in pad.query([[
-      SELECT id, shape, sketch FROM objects
-      WHERE sketch LIKE ?
-      ORDER BY coldness ASC, created_at DESC
-      LIMIT 20;
-    ]], "%" .. action.term .. "%", now) do
+    for id, shape, sketch in pad.search(action.term, 20) do
       results[#results + 1] = { id = id, shape = shape, sketch = sketch }
     end
     return { ok = true, results = results }

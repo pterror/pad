@@ -79,6 +79,13 @@ mod.init_sql = [[
   CREATE INDEX IF NOT EXISTS idx_annotations_object ON annotations(object_id);
   CREATE INDEX IF NOT EXISTS idx_annotations_key ON annotations(key);
   CREATE INDEX IF NOT EXISTS idx_objects_coldness ON objects(coldness);
+
+  -- FTS5 full-text search index (stores sketch text for fast search)
+  CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(
+    sketch,
+    content='',
+    content_rowid='id'
+  );
 ]]
 
 return mod

@@ -26,6 +26,8 @@ Everything below is implemented and tested (91 tests passing):
 - **HTTP/WebSocket listener**: Port 7778. HTTP serves JSON stats on `/` and `/status`. WebSocket upgrade uses same dispatch protocol as unix socket. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
 - **Dispatch module**: `pad/dispatch.lua` — shared JSON action routing used by both unix socket and WebSocket, with pcall error handling
 - **Web UI extension**: `extensions/web/` — local web UI on daemon port 7778. Table router with chain composition, JSON API endpoints, single-file HTML frontend (dark terminal theme, vanilla JS, no build step). See `docs/api.md` for endpoint reference
+- **FTS5 full-text search**: `--search` uses SQLite FTS5 with BM25 ranking. Supports phrases ("hello world"), boolean (test AND another), and prefix (hel*) queries. Auto-migrates existing databases
+- **Browser extension**: `extensions/browser/` — Chrome (MV3) and Firefox (MV2) context menu capture via WebSocket
 
 ## Next Up
 
@@ -51,7 +53,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - RSS/Atom feed extension
 - Screenshot OCR extension
 - Export/import (pad dump, pad load)
-- Full-text search index (SQLite FTS5)
+- ~~Full-text search index (SQLite FTS5)~~ DONE - auto-migrates existing DBs
 - Compression for cold objects (zstd via FFI)
 - REPL readline/linenoise support for history and editing
 - Exit code tracking for shell wrapper commands (for --urgent)

@@ -87,17 +87,15 @@ end
 -- flag handlers
 
 local function do_search(term)
-  local now = os.time()
-  local results = pad.query([[
-    SELECT id, shape, sketch FROM objects
-    WHERE sketch LIKE ?
-    ORDER BY
-      coldness + ((? - COALESCE(last_accessed_at, created_at)) / 86400.0 * 0.001) ASC,
-      created_at DESC
-    LIMIT 20;
-  ]], "%" .. term .. "%", now)
+  -- Use FTS5 for full-text search with BM25 ranking
+  local results = pad.search(term)
+  local count = 0
   for id, shape, sketch in results do
     print(string.format("[%d] (%s) %s", id, shape, sketch:sub(1, 80)))
+    count = count + 1
+  end
+  if count == 0 then
+    print("no results")
   end
 end
 

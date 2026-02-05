@@ -47,6 +47,19 @@ if not db then error("pad: could not open database at " .. db_path) end
 mod.db = db
 db:execute(schema.init_sql)
 
+-- Auto-rebuild FTS index if empty but objects exist (migration)
+local function check_fts_migration()
+  local fts_count = ops.fts_count(db)
+  if fts_count == 0 then
+    local iter = ops.query(db, "SELECT COUNT(*) FROM objects;")
+    local obj_count = iter()
+    if obj_count > 0 then
+      ops.rebuild_fts(db)
+    end
+  end
+end
+check_fts_migration()
+
 -- pure functions (no state, no db)
 
 function mod.hash(data)
@@ -241,6 +254,14 @@ end
 
 function mod.query(sql, ...)
   return ops.query(db, sql, ...)
+end
+
+function mod.search(term, limit)
+  return ops.search_fts(db, term, limit or 20)
+end
+
+function mod.rebuild_fts()
+  ops.rebuild_fts(db)
 end
 
 return mod
