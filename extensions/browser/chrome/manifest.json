@@ -3,8 +3,8 @@
   "name": "pad capture",
   "version": "0.1.0",
   "description": "Capture content to pad daemon",
-  "permissions": ["contextMenus", "activeTab"],
-  "host_permissions": ["http://localhost:7778/*"],
+  "permissions": ["contextMenus", "activeTab", "storage"],
+  "host_permissions": ["http://localhost/*", "ws://localhost/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -15,6 +15,7 @@
   "action": {
     "default_title": "pad capture"
   },
+  "options_page": "options.html",
   "commands": {
     "capture-page": {
       "suggested_key": {

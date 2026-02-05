@@ -3,7 +3,7 @@
   "name": "pad capture",
   "version": "0.1.0",
   "description": "Capture content to pad daemon",
-  "permissions": ["contextMenus", "activeTab", "<all_urls>"],
+  "permissions": ["contextMenus", "activeTab", "storage", "<all_urls>"],
   "background": {
     "scripts": ["background.js"]
   },
@@ -13,6 +13,10 @@
   }],
   "browser_action": {
     "default_title": "pad capture"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "browser_style": false
   },
   "commands": {
     "capture-page": {

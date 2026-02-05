@@ -1,7 +1,24 @@
 // pad capture - background service worker
 // Handles context menus, keyboard shortcuts, and WebSocket connection to pad daemon
 
-const PAD_WS_URL = 'ws://localhost:7778';
+const DEFAULT_WS_URL = 'ws://localhost:7778';
+let PAD_WS_URL = DEFAULT_WS_URL;
+
+// Load settings
+chrome.storage.sync.get({ wsUrl: DEFAULT_WS_URL }, (items) => {
+  PAD_WS_URL = items.wsUrl;
+});
+
+// Listen for settings changes
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.wsUrl) {
+    PAD_WS_URL = changes.wsUrl.newValue;
+    // Reconnect with new URL
+    if (ws) {
+      ws.close();
+    }
+  }
+});
 
 // Cross-browser badge API (MV3: action, MV2: browserAction)
 const badgeAPI = chrome.action || chrome.browserAction;
