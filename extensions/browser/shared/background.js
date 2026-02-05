@@ -90,6 +90,12 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Capture tables to pad',
     contexts: ['page']
   });
+
+  chrome.contextMenus.create({
+    id: 'pad-screenshot',
+    title: 'Capture screenshot to pad',
+    contexts: ['page']
+  });
 });
 
 // Connect to pad daemon via WebSocket
@@ -242,6 +248,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             `--- Table ${i + 1} ---\n${t}`
           ).join('\n\n');
           capture(content, 'table', { url: pageUrl, title: pageTitle, count: response.tables.length });
+        }
+      });
+      break;
+
+    case 'pad-screenshot':
+      // Capture visible tab as PNG
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+        if (chrome.runtime.lastError) {
+          console.error('pad: screenshot error', chrome.runtime.lastError);
+          showBadge('!', '#dc3545');
+          return;
+        }
+        if (dataUrl) {
+          capture(dataUrl, 'screenshot', { url: pageUrl, title: pageTitle });
         }
       });
       break;

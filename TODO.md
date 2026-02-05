@@ -40,7 +40,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - ~~Options page to configure daemon URL/port~~ DONE
 - ~~Capture page as markdown (readability-style extraction)~~ DONE
 - ~~Capture all links on page (batch)~~ DONE
-- Capture visible screenshot
+- ~~Capture visible screenshot~~ DONE (as data URL)
 - ~~Capture code blocks from pages (detect `<pre>`, `<code>`)~~ DONE
 - ~~Capture tables as structured data~~ DONE (TSV format)
 
