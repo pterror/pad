@@ -29,7 +29,20 @@ Everything below is implemented and tested (91 tests passing):
 
 ## Next Up
 
-- Browser extension (`extensions/browser/`) — capture URLs, page content, selections
+### Browser Extension Enhancements
+
+Basic extension done (`extensions/browser/`). Potential additions:
+
+- Keyboard shortcuts (Ctrl+Shift+P to capture page)
+- Badge notification on successful capture
+- Options page to configure daemon URL/port
+- Capture page as markdown (readability-style extraction)
+- Capture all links on page (batch)
+- Capture visible screenshot
+- Capture code blocks from pages (detect `<pre>`, `<code>`)
+- Capture tables as structured data
+
+### Other
 
 ## Low Priority / Future
 
