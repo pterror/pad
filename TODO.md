@@ -37,7 +37,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 
 - ~~Keyboard shortcuts (Ctrl+Shift+P to capture page)~~ DONE
 - ~~Badge notification on successful capture~~ DONE
-- Options page to configure daemon URL/port
+- ~~Options page to configure daemon URL/port~~ DONE
 - Capture page as markdown (readability-style extraction)
 - Capture all links on page (batch)
 - Capture visible screenshot

@@ -45,7 +45,13 @@ let messageQueue = [];
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'pad-page',
-    title: 'Capture page to pad',
+    title: 'Capture page URL to pad',
+    contexts: ['page']
+  });
+
+  chrome.contextMenus.create({
+    id: 'pad-content',
+    title: 'Capture page content to pad',
     contexts: ['page']
   });
 
@@ -165,6 +171,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   switch (info.menuItemId) {
     case 'pad-page':
       capture(pageUrl, 'url', { title: pageTitle });
+      break;
+
+    case 'pad-content':
+      // Request markdown content from content script
+      chrome.tabs.sendMessage(tab.id, { action: 'getMarkdown' }, (response) => {
+        if (response && response.markdown) {
+          capture(response.markdown, 'markdown', { url: pageUrl, title: pageTitle });
+        }
+      });
       break;
 
     case 'pad-selection':
