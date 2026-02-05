@@ -514,6 +514,291 @@ test("daemon: timerfd creation", function()
   ffi.C.close(fd)
 end)
 
+-- parser tests (pure, no db required)
+
+package.path = package.path .. ";../extensions/?.lua;../extensions/?/init.lua"
+local parsers = require("parsers")
+
+test("parsers: registry lists all parsers", function()
+  local list = parsers.list()
+  assert(#list >= 19, "should have at least 19 parsers, got " .. #list)
+end)
+
+test("parser rg: counts matches and files", function()
+  local output = [[src/main.lua:10:local foo = 1
+src/main.lua:25:foo = foo + 1
+src/util.lua:5:local foo = require("foo")]]
+  local result = parsers.parse("rg", output, {"rg", "foo", "src/"})
+  assert_eq(result.shape, "log")
+  assert_eq(result.annotations.tool, "rg")
+  assert_eq(result.annotations.match_count, "3")
+  assert_eq(result.annotations.file_count, "2")
+  assert_eq(result.annotations.pattern, "foo")
+end)
+
+test("parser grep: counts matches and files", function()
+  local output = [[config.lua:12:debug = true
+config.lua:45:debug_level = 3]]
+  local result = parsers.parse("grep", output, {"grep", "-n", "debug", "config.lua"})
+  assert_eq(result.shape, "log")
+  assert_eq(result.annotations.tool, "grep")
+  assert_eq(result.annotations.match_count, "2")
+  assert_eq(result.annotations.pattern, "debug")
+end)
+
+test("parser ls: short format detects list shape", function()
+  local output = [[file1.txt
+file2.lua
+dir1]]
+  local result = parsers.parse("ls", output, {"ls"})
+  assert_eq(result.shape, "list")
+  assert_eq(result.annotations.entry_count, "3")
+end)
+
+test("parser ls: long format detects table shape", function()
+  local output = [[total 12
+-rw-r--r-- 1 user user 100 Jan 1 10:00 file1.txt
+drwxr-xr-x 2 user user 4096 Jan 1 10:00 dir1]]
+  local result = parsers.parse("ls", output, {"ls", "-la"})
+  assert_eq(result.shape, "table")
+  assert_eq(result.annotations.entry_count, "2")
+end)
+
+test("parser jq: detects object shape", function()
+  local output = [[{"name": "test", "value": 42}]]
+  local result = parsers.parse("jq", output, {"jq", ".data"})
+  assert_eq(result.shape, "object")
+  assert_eq(result.annotations.filter, ".data")
+end)
+
+test("parser jq: detects list shape", function()
+  local output = [=[ ["a", "b", "c"] ]=]
+  local result = parsers.parse("jq", output, {"jq", ".[]"})
+  assert_eq(result.shape, "list")
+end)
+
+test("parser tree: extracts dir and file counts", function()
+  -- tree output ends with summary line
+  local output = ".\n|-- src\n|   `-- main.lua\n`-- test.lua\n\n1 directory, 2 files"
+  local result = parsers.parse("tree", output, {"tree"})
+  assert_eq(result.shape, "list")
+  assert_eq(result.annotations.dir_count, "1")
+  assert_eq(result.annotations.file_count, "2")
+end)
+
+test("parser find: counts files and dirs", function()
+  local output = [[./src/
+./src/main.lua
+./test.lua]]
+  local result = parsers.parse("find", output, {"find", ".", "-type", "f"})
+  assert_eq(result.shape, "list")
+  assert_eq(result.annotations.dir_count, "1")
+  assert_eq(result.annotations.file_count, "2")
+  assert_eq(result.annotations.type_filter, "f")
+end)
+
+test("parser git log: counts commits", function()
+  local output = [[commit abc123def456
+Author: User <user@example.com>
+Date:   Mon Jan 1 10:00:00 2024 +0000
+
+    First commit
+
+commit def456abc789
+Author: User <user@example.com>
+Date:   Mon Jan 1 09:00:00 2024 +0000
+
+    Initial commit]]
+  local result = parsers.parse("git", output, {"git", "log"})
+  assert_eq(result.shape, "log")
+  assert_eq(result.annotations.git_subcmd, "log")
+  assert_eq(result.annotations.commit_count, "2")
+end)
+
+test("parser git diff: counts files and changes", function()
+  local output = [[diff --git a/src/main.lua b/src/main.lua
+index abc123..def456 100644
+--- a/src/main.lua
++++ b/src/main.lua
+@@ -1,3 +1,4 @@
+ local foo = 1
++local bar = 2
+-local baz = 3]]
+  local result = parsers.parse("git", output, {"git", "diff"})
+  assert_eq(result.shape, "log")
+  assert_eq(result.annotations.git_subcmd, "diff")
+  assert_eq(result.annotations.files_changed, "1")
+  assert_eq(result.annotations.insertions, "1")
+  assert_eq(result.annotations.deletions, "1")
+end)
+
+test("parser git status: counts file states", function()
+  local output = [[ M src/main.lua
+ A src/new.lua
+ D src/old.lua
+?? untracked.txt]]
+  local result = parsers.parse("git", output, {"git", "status", "-s"})
+  assert_eq(result.annotations.git_subcmd, "status")
+  assert_eq(result.annotations.modified, "1")
+  assert_eq(result.annotations.added, "1")
+  assert_eq(result.annotations.deleted, "1")
+  assert_eq(result.annotations.untracked, "1")
+end)
+
+test("parser git branch: counts branches and finds current", function()
+  local output = [[  develop
+* main
+  feature-x]]
+  local result = parsers.parse("git", output, {"git", "branch"})
+  assert_eq(result.shape, "list")
+  assert_eq(result.annotations.branch_count, "3")
+  assert_eq(result.annotations.current_branch, "main")
+end)
+
+test("parser docker ps: counts containers", function()
+  local output = [[CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+abc123         nginx     "nginx"   1h ago    Up 1h     80/tcp    web
+def456         redis     "redis"   2h ago    Up 2h     6379/tcp  cache]]
+  local result = parsers.parse("docker", output, {"docker", "ps"})
+  assert_eq(result.shape, "table")
+  assert_eq(result.annotations.docker_subcmd, "ps")
+  assert_eq(result.annotations.entry_count, "2")
+  assert_eq(result.annotations.resource_type, "container")
+end)
+
+test("parser docker images: counts images", function()
+  local output = [[REPOSITORY   TAG       IMAGE ID       CREATED       SIZE
+nginx        latest    abc123         1 week ago    150MB]]
+  local result = parsers.parse("docker", output, {"docker", "images"})
+  assert_eq(result.annotations.resource_type, "image")
+  assert_eq(result.annotations.entry_count, "1")
+end)
+
+test("parser curl: extracts URL and HTTP status from headers", function()
+  local output = [[HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"status": "ok"}]]
+  local result = parsers.parse("curl", output, {"curl", "-i", "https://api.example.com/status"})
+  -- shape is text because output starts with HTTP headers, not JSON
+  assert_eq(result.shape, "text")
+  assert_eq(result.annotations.tool, "curl")
+  assert_eq(result.annotations.url, "https://api.example.com/status")
+  assert_eq(result.annotations.http_status, "200")
+  assert_match(result.annotations.content_type, "application/json")
+end)
+
+test("parser curl: detects JSON body shape", function()
+  local output = [[{"data": [1, 2, 3]}]]
+  local result = parsers.parse("curl", output, {"curl", "https://api.example.com/data"})
+  assert_eq(result.shape, "object")
+  assert_eq(result.annotations.url, "https://api.example.com/data")
+end)
+
+test("parser wget: reuses curl parser", function()
+  local output = [[HTTP/1.1 301 Moved
+Location: https://example.com/]]
+  local result = parsers.parse("wget", output, {"wget", "-S", "http://example.com"})
+  assert_eq(result.annotations.tool, "wget")
+  assert_eq(result.annotations.http_status, "301")
+end)
+
+test("parser make: counts errors and warnings", function()
+  local output = [[gcc -c main.c
+main.c:10: warning: unused variable 'x'
+main.c:15: warning: implicit declaration
+main.c:20: error: undefined reference to 'foo'
+main.c:25: error: redefinition of 'bar']]
+  local result = parsers.parse("make", output, {"make"})
+  assert_eq(result.shape, "log")
+  assert_eq(result.annotations.error_count, "2")
+  assert_eq(result.annotations.warning_count, "2")
+  assert_eq(result.annotations.build_success, "false")
+end)
+
+test("parser make: detects success", function()
+  local output = [[gcc -c main.c
+gcc -o main main.o]]
+  local result = parsers.parse("make", output, {"make"})
+  assert_eq(result.annotations.build_success, "true")
+  assert_eq(result.annotations.error_count, "0")
+end)
+
+test("parser cargo: reuses make parser", function()
+  local output = [[   Compiling foo v0.1.0
+warning: unused import
+error[E0425]: cannot find value `bar`]]
+  local result = parsers.parse("cargo", output, {"cargo", "build"})
+  assert_eq(result.annotations.tool, "cargo")
+  assert_eq(result.annotations.warning_count, "1")
+  assert_eq(result.annotations.error_count, "1")
+end)
+
+test("parser npm: reuses make parser", function()
+  local output = [[npm WARN deprecated lodash@1.0.0
+npm ERR! code ENOENT]]
+  local result = parsers.parse("npm", output, {"npm", "install"})
+  assert_eq(result.annotations.tool, "npm")
+end)
+
+test("parser ps: counts processes", function()
+  local output = [[  PID TTY          TIME CMD
+ 1234 pts/0    00:00:01 bash
+ 5678 pts/0    00:00:00 vim]]
+  local result = parsers.parse("ps", output, {"ps"})
+  assert_eq(result.shape, "table")
+  assert_eq(result.annotations.process_count, "2")
+end)
+
+test("parser top: reuses ps parser", function()
+  local output = [[  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+ 1234 user      20   0  123456  12345   1234 S   0.0   0.1   0:00.01 bash]]
+  local result = parsers.parse("top", output, {"top", "-bn1"})
+  assert_eq(result.annotations.tool, "top")
+  assert_eq(result.annotations.process_count, "1")
+end)
+
+test("parser df: counts filesystems", function()
+  local output = [[Filesystem     1K-blocks    Used Available Use% Mounted on
+/dev/sda1       50000000 20000000  30000000  40% /
+tmpfs            1000000    10000    990000   1% /tmp]]
+  local result = parsers.parse("df", output, {"df"})
+  assert_eq(result.shape, "table")
+  assert_eq(result.annotations.filesystem_count, "2")
+end)
+
+test("parser du: counts entries", function()
+  local output = [[4	./src
+8	./test
+12	.]]
+  local result = parsers.parse("du", output, {"du", "-s", "."})
+  assert_eq(result.shape, "table")
+  assert_eq(result.annotations.tool, "du")
+  assert_eq(result.annotations.entry_count, "3")
+end)
+
+test("parser sed: counts output lines", function()
+  local output = [[line one modified
+line two modified
+line three modified]]
+  local result = parsers.parse("sed", output, {"sed", "s/old/new/g"})
+  assert_eq(result.shape, "text")
+  assert_eq(result.annotations.line_count, "3")
+end)
+
+test("parser awk: reuses sed parser", function()
+  local output = [[field1 field2
+field3 field4]]
+  local result = parsers.parse("awk", output, {"awk", "{print $1}"})
+  assert_eq(result.annotations.tool, "awk")
+  assert_eq(result.annotations.line_count, "2")
+end)
+
+test("parsers: unknown parser returns nil", function()
+  local result = parsers.parse("nonexistent", "some output", {"nonexistent"})
+  assert(result == nil, "unknown parser should return nil")
+end)
+
 -- cleanup
 os.execute("rm -rf " .. test_dir)
 

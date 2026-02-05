@@ -2,7 +2,7 @@
 
 ## What Works
 
-Everything below is implemented and tested (58 tests passing):
+Everything below is implemented and tested (91 tests passing):
 
 - **Primitives architecture**: ops.lua / validate.lua / core.lua
 - **CLI flags**: --search, --show, --recent, --history, --sources, --note, --tag, --untag, --tagged, --recall, --orphans, --stats, --vacuum, --gc, --urgent, --clip, --git-log, --git-diff, --git-status, --watch, --unwatch, --watching, --daemon
@@ -26,6 +26,10 @@ Everything below is implemented and tested (58 tests passing):
 - **HTTP/WebSocket listener**: Port 7778. HTTP serves JSON stats on `/` and `/status`. WebSocket upgrade uses same dispatch protocol as unix socket. Enables real-time IPC with browser extensions, VS Code extensions, Obsidian plugins, etc.
 - **Dispatch module**: `pad/dispatch.lua` — shared JSON action routing used by both unix socket and WebSocket, with pcall error handling
 - **Web UI extension**: `extensions/web/` — local web UI on daemon port 7778. Table router with chain composition, JSON API endpoints, single-file HTML frontend (dark terminal theme, vanilla JS, no build step). See `docs/api.md` for endpoint reference
+
+## Next Up
+
+- Browser extension (`extensions/browser/`) — capture URLs, page content, selections
 
 ## Low Priority / Future
 

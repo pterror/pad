@@ -1,13 +1,11 @@
 -- tree output parser
--- last line: "N directories, M files"
+-- last line: "N directories, M files" or "N directory, M file"
 
 return function(output, args)
   local dirs, files
-  local summary = output:match("(%d+ directories?, %d+ files?)%s*$")
-  if summary then
-    dirs = summary:match("^(%d+) director")
-    files = summary:match(", (%d+) file")
-  end
+  -- match "N director(y|ies), M file(s)" at end of output
+  dirs = output:match("(%d+) director[yies]+,%s*%d+ files?%s*$")
+  files = output:match("%d+ director[yies]+,%s*(%d+) files?%s*$")
 
   return {
     shape = "list",
