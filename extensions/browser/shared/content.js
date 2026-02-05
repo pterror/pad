@@ -132,6 +132,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({
       markdown: getPageMarkdown()
     });
+  } else if (request.action === 'getAllLinks') {
+    const links = Array.from(document.querySelectorAll('a[href]'))
+      .map(a => ({
+        href: a.href,
+        text: a.textContent.trim().substring(0, 100) || a.href
+      }))
+      .filter(l => l.href.startsWith('http') && !l.href.startsWith('javascript:'))
+      .filter((l, i, arr) => arr.findIndex(x => x.href === l.href) === i); // dedupe
+    sendResponse({ links: links });
+  } else if (request.action === 'getCodeBlocks') {
+    const blocks = [];
+
+    // Find <pre> elements (often contain code)
+    document.querySelectorAll('pre').forEach(pre => {
+      const code = pre.querySelector('code');
+      const text = (code || pre).textContent.trim();
+      if (text.length > 0) {
+        // Try to detect language from class
+        const classes = (code || pre).className;
+        const langMatch = classes.match(/language-(\w+)|lang-(\w+)|(\w+)-code/);
+        const lang = langMatch ? (langMatch[1] || langMatch[2] || langMatch[3]) : '';
+        blocks.push({ code: text, lang: lang });
+      }
+    });
+
+    // Find standalone <code> not inside <pre>
+    document.querySelectorAll('code').forEach(code => {
+      if (!code.closest('pre')) {
+        const text = code.textContent.trim();
+        if (text.length > 20) { // Only capture longer inline code
+          blocks.push({ code: text, lang: '' });
+        }
+      }
+    });
+
+    sendResponse({ blocks: blocks });
   }
   return true;
 });

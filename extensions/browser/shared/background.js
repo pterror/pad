@@ -72,6 +72,18 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Capture link to pad',
     contexts: ['link']
   });
+
+  chrome.contextMenus.create({
+    id: 'pad-all-links',
+    title: 'Capture all links to pad',
+    contexts: ['page']
+  });
+
+  chrome.contextMenus.create({
+    id: 'pad-code-blocks',
+    title: 'Capture code blocks to pad',
+    contexts: ['page']
+  });
 });
 
 // Connect to pad daemon via WebSocket
@@ -192,6 +204,28 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
     case 'pad-link':
       capture(info.linkUrl, 'link', { url: pageUrl, link_text: info.linkText || '' });
+      break;
+
+    case 'pad-all-links':
+      // Request all links from content script
+      chrome.tabs.sendMessage(tab.id, { action: 'getAllLinks' }, (response) => {
+        if (response && response.links && response.links.length > 0) {
+          const content = response.links.map(l => `${l.text}: ${l.href}`).join('\n');
+          capture(content, 'links', { url: pageUrl, title: pageTitle, count: response.links.length });
+        }
+      });
+      break;
+
+    case 'pad-code-blocks':
+      // Request code blocks from content script
+      chrome.tabs.sendMessage(tab.id, { action: 'getCodeBlocks' }, (response) => {
+        if (response && response.blocks && response.blocks.length > 0) {
+          const content = response.blocks.map((b, i) =>
+            `--- Block ${i + 1}${b.lang ? ` (${b.lang})` : ''} ---\n${b.code}`
+          ).join('\n\n');
+          capture(content, 'code', { url: pageUrl, title: pageTitle, count: response.blocks.length });
+        }
+      });
       break;
   }
 });
