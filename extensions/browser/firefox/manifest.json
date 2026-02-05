@@ -1,0 +1,24 @@
+{
+  "manifest_version": 2,
+  "name": "pad capture",
+  "version": "0.1.0",
+  "description": "Capture content to pad daemon",
+  "permissions": ["contextMenus", "activeTab", "<all_urls>"],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"]
+  }],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pad@localhost"
+    }
+  }
+}

@@ -17,6 +17,9 @@ node_modules/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 
+# Browser extension build output
+extensions/browser/dist/
+
 # OS
 .DS_Store
 Thumbs.db
