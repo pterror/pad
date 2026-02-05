@@ -315,6 +315,21 @@ local function do_gc(confirm)
 end
 
 local function do_urgent()
+  -- failed commands (exit_code != 0)
+  local failed_results = pad.query([[
+    SELECT o.id, e.command, a.value as exit_code, e.created_at
+    FROM objects o
+    JOIN events e ON e.id = o.event_id
+    JOIN annotations a ON a.object_id = o.id
+    WHERE a.key = 'exit_code' AND CAST(a.value AS INTEGER) != 0
+    ORDER BY e.created_at DESC
+    LIMIT 10;
+  ]])
+  local failed = {}
+  for id, command, exit_code, created_at in failed_results do
+    failed[#failed + 1] = { id = id, command = command, exit_code = exit_code, created_at = created_at }
+  end
+
   -- recently ingested, not yet accessed (access_count = 1 means only creation)
   local results = pad.query([[
     SELECT o.id, o.shape, o.sketch, e.source, e.created_at
@@ -342,6 +357,14 @@ local function do_urgent()
     action_items[#action_items + 1] = { id = id, shape = shape, sketch = sketch, tag = value }
   end
 
+  if #failed > 0 then
+    print("-- failed commands --")
+    for _, item in ipairs(failed) do
+      local time = os.date("%Y-%m-%d %H:%M", item.created_at)
+      print(string.format("[%d] %s exit=%s %s", item.id, time, item.exit_code, item.command or "(unknown)"))
+    end
+  end
+
   if #action_items > 0 then
     print("-- action items --")
     for _, item in ipairs(action_items) do
@@ -357,7 +380,7 @@ local function do_urgent()
     end
   end
 
-  if #action_items == 0 and #unreviewed == 0 then
+  if #failed == 0 and #action_items == 0 and #unreviewed == 0 then
     io.stderr:write("pad: nothing urgent\n")
   end
 end
@@ -698,16 +721,27 @@ local function main(args)
   elseif flags.load then
     do_load(flags.load)
   elseif #cmd_args > 0 then
-    -- shell wrapper: run command, capture output, log event
+    -- shell wrapper: run command, capture output and exit code, log event
     local full_cmd = table.concat(cmd_args, " ")
     local real_args, wrappers = unwrap.unwrap(cmd_args)
     local real_cmd = table.concat(real_args, " ")
     local base = unwrap.base_command(real_args)
 
-    local handle = io.popen(full_cmd .. " 2>&1")
+    -- Capture output and exit code using shell trick
+    local handle = io.popen(full_cmd .. " 2>&1; echo \"__PAD_EXIT:$?\"")
     if handle then
-      local output = handle:read("*a")
+      local raw_output = handle:read("*a")
       handle:close()
+
+      -- Extract exit code from last line
+      local output, exit_code = raw_output:match("^(.-)__PAD_EXIT:(%d+)%s*$")
+      if not output then
+        output = raw_output
+        exit_code = nil
+      else
+        exit_code = tonumber(exit_code)
+      end
+
       if output and #output > 0 then
         -- check for parser
         local parsed = parsers and base and parsers.parse(base, output, real_args)
@@ -723,6 +757,11 @@ local function main(args)
           shape = parsed and parsed.shape or nil,
           metadata = meta,
         })
+
+        -- store exit code as object annotation (for --urgent)
+        if exit_code then
+          pad.annotate({ object_id = id, key = "exit_code", value = tostring(exit_code) })
+        end
 
         -- apply parser annotations
         if parsed and parsed.annotations then

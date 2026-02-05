@@ -16,7 +16,7 @@ Everything below is implemented and tested (91 tests passing):
 - **Budget enforcement**: validate.budget_objects and validate.budget_edges enforced in core.link
 - **Edge type validation**: validate.relation() enforces known types (supersedes, derived_from, references, reply_to, sketch_of)
 - **Sketch-as-object**: core.create_sketch/get_sketches creates linked sketch objects with sketch_of edges (inline sketch kept for quick display)
-- **Time awareness**: `--urgent` surfaces unreviewed objects (access_count <= 1) and objects tagged todo/urgent/deadline
+- **Time awareness**: `--urgent` surfaces failed commands (exit_code != 0), unreviewed objects, and objects tagged todo/urgent/deadline
 - **Clipboard extension**: `--clip` captures clipboard (auto-detects wl-paste, xclip, xsel, pbpaste)
 - **Git extension**: `--git-log [n]`, `--git-diff [ref]`, `--git-status` capture git output with source = "git:*"
 - **Shell integration**: pad.bash (bash/zsh) and pad.fish (fish) with aliases, completions, and preexec hooks
@@ -57,6 +57,6 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - ~~Full-text search index (SQLite FTS5)~~ DONE - auto-migrates existing DBs
 - Compression for cold objects (zstd via FFI)
 - REPL readline/linenoise support for history and editing
-- Exit code tracking for shell wrapper commands (for --urgent)
+- ~~Exit code tracking for shell wrapper commands (for --urgent)~~ DONE
 - Events during unusual hours detection (for --urgent)
 - Non-Linux fallback for inotify (timerfd + stat polling)
