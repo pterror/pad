@@ -6,7 +6,7 @@ Everything below is implemented and tested (91 tests passing):
 
 - **Primitives architecture**: ops.lua / validate.lua / core.lua
 - **CLI flags**: --search, --show, --recent, --history, --sources, --note, --tag, --untag, --tagged, --recall, --orphans, --stats, --vacuum, --gc, --urgent, --clip, --git-log, --git-diff, --git-status, --watch, --unwatch, --watching, --daemon
-- **Interactive REPL**: TTY + no args starts REPL with /command dispatch, bare text captured as notes
+- **Interactive REPL**: TTY + no args starts REPL with /command dispatch, bare text captured as notes, readline support with history (if libreadline available)
 - **Shell wrapper**: `pad <cmd>` captures output with `source = "command"`
 - **Command unwrapping**: nix run/shell/develop, sudo, time, strace, ltrace, env, nice, timeout, watch
 - **Output parsers**: rg, ls, grep, jq, tree, find, git, docker, curl, wget, make, cargo, npm, ps, top, df, du, sed, awk (plugin registry in extensions/parsers/)
@@ -56,7 +56,7 @@ Basic extension done (`extensions/browser/`). Potential additions:
 - ~~Export/import (pad dump, pad load)~~ DONE
 - ~~Full-text search index (SQLite FTS5)~~ DONE - auto-migrates existing DBs
 - Compression for cold objects (zstd via FFI)
-- REPL readline/linenoise support for history and editing
+- ~~REPL readline/linenoise support for history and editing~~ DONE (FFI, falls back to basic io)
 - ~~Exit code tracking for shell wrapper commands (for --urgent)~~ DONE
 - Events during unusual hours detection (for --urgent)
 - Non-Linux fallback for inotify (timerfd + stat polling)

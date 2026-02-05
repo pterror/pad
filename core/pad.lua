@@ -49,6 +49,8 @@ if not ok_clip then clipboard = nil end
 local ok_git, git_ext = pcall(require, "git")
 if not ok_git then git_ext = nil end
 local json = require("dep.lunajson")
+local ok_readline, readline = pcall(require, "dep.readline")
+if not ok_readline then readline = nil end
 
 local function is_tty()
   local _, code = os.execute("test -t 0")
@@ -803,34 +805,68 @@ local function main(args)
       watch = do_watch,
       unwatch = do_unwatch,
       watching = function() do_watching() end,
+      dump = function(f) do_dump(f) end,
+      load = function(f) do_load(f) end,
     }
+
+    -- Setup readline with history
+    local history_file = (os.getenv("PAD_DIR") or (os.getenv("HOME") .. "/.pad")) .. "/history"
+    local use_readline = readline and readline.available
+    if use_readline then
+      readline.read_history(history_file)
+    end
+
+    local function read_line(prompt)
+      if use_readline then
+        return readline.readline(prompt)
+      else
+        io.stderr:write(prompt)
+        return io.stdin:read("*l")
+      end
+    end
+
     io.stderr:write("pad: interactive mode (type text for notes, /command for operations, ctrl+d to exit)\n")
+    if use_readline then
+      io.stderr:write("pad: readline enabled (up/down for history)\n")
+    end
+
     while true do
-      io.stderr:write("> ")
-      local line = io.stdin:read("*l")
+      local line = read_line("pad> ")
       if not line then break end
       local trimmed = line:match("^%s*(.-)%s*$")
       if #trimmed == 0 then
         -- skip empty lines
-      elseif trimmed:match("^/") then
-        local cmd, rest = trimmed:match("^/(%S+)%s*(.*)")
-        if cmd == "quit" or cmd == "exit" or cmd == "q" then
-          break
-        elseif cmd == "help" then
-          print("commands: /search /show /recent /history /sources /note /tag /untag /tagged /recall /stats /orphans /vacuum /gc /urgent /clip /git-log /git-diff /git-status /watch /unwatch /watching /quit")
-          print("anything else is captured as a note")
-        elseif repl_commands[cmd] then
-          local arg = #rest > 0 and rest or nil
-          local ok, err = pcall(repl_commands[cmd], arg or true)
-          if not ok then io.stderr:write("error: " .. tostring(err) .. "\n") end
-        else
-          io.stderr:write("pad: unknown command /" .. cmd .. " (try /help)\n")
-        end
       else
-        -- default: capture as note
-        local id, hash = pad.ingest(trimmed, { source = "note" })
-        io.stderr:write(string.format("pad: note -> [%d] %s\n", id, hash))
+        -- Add to history
+        if use_readline then
+          readline.add_history(trimmed)
+        end
+
+        if trimmed:match("^/") then
+          local cmd, rest = trimmed:match("^/(%S+)%s*(.*)")
+          if cmd == "quit" or cmd == "exit" or cmd == "q" then
+            break
+          elseif cmd == "help" then
+            print("commands: /search /show /recent /history /sources /note /tag /untag /tagged /recall /stats /orphans /vacuum /gc /urgent /clip /git-log /git-diff /git-status /watch /unwatch /watching /dump /load /quit")
+            print("anything else is captured as a note")
+          elseif repl_commands[cmd] then
+            local arg = #rest > 0 and rest or nil
+            local ok, err = pcall(repl_commands[cmd], arg or true)
+            if not ok then io.stderr:write("error: " .. tostring(err) .. "\n") end
+          else
+            io.stderr:write("pad: unknown command /" .. cmd .. " (try /help)\n")
+          end
+        else
+          -- default: capture as note
+          local id, hash = pad.ingest(trimmed, { source = "note" })
+          io.stderr:write(string.format("pad: note -> [%d] %s\n", id, hash))
+        end
       end
+    end
+
+    -- Save history on exit
+    if use_readline then
+      readline.write_history(history_file)
     end
   end
 end
